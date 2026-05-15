@@ -158,7 +158,15 @@ export function UrlInput({ destinations, settings, onAddListing, onUpdateListing
           <input
             type="url"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              const match = val.match(/https?:\/\/[^\s"'<>]+/);
+              if (match && val.trim() !== match[0]) {
+                setUrl(match[0].replace(/[.,!?)]+$/, ''));
+              } else {
+                setUrl(val);
+              }
+            }}
             onPaste={(e) => {
               const text = e.clipboardData.getData('text');
               const match = text.match(/https?:\/\/[^\s"'<>]+/);
