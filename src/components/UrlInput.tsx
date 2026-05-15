@@ -161,11 +161,10 @@ export function UrlInput({ destinations, settings, onAddListing, onUpdateListing
             onChange={(e) => setUrl(e.target.value)}
             onPaste={(e) => {
               const text = e.clipboardData.getData('text');
-              const match = text.match(/https?:\/\/\S+/);
-              if (match && match[0] !== text.trim()) {
-                e.preventDefault();
-                setUrl(match[0].replace(/[.,!?)]+$/, ''));
-              }
+              const match = text.match(/https?:\/\/[^\s"'<>]+/);
+              if (!match) return;
+              e.preventDefault();
+              setUrl(match[0].replace(/[.,!?)]+$/, ''));
             }}
             placeholder="WG-Gesucht Link einfügen…"
             required
