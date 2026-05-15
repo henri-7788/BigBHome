@@ -1,0 +1,249 @@
+'use client';
+
+import { useState } from 'react';
+import dynamic from 'next/dynamic';
+import { Destination, DestinationJourney, ListingResult } from '@/lib/types';
+import { JourneyResultView } from './JourneyResult';
+import { ScoreBar } from './ScoreBar';
+import { LoadingSpinner } from './LoadingSpinner';
+
+const ListingMap = dynamic(() => import('./ListingMap'), { ssr: false });
+
+interface Props {
+  result: ListingResult;
+  destinations: Destination[];
+  onRemove: (id: string) => void;
+  onToggleFavorite: (id: string, newValue: boolean) => void;
+  onToggleComparison: (id: string) => void;
+  onRetryJourney: (id: string) => void;
+}
+
+function JourneySection({
+  destinationJourneys,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  destinationJourneys: DestinationJourney[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry?: () => void;
+}) {
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2">
+        <LoadingSpinner size="sm" />
+        <span className="text-xs text-gray-400">Route wird berechnet…</span>
+      </div>
+    );
+  }
+
+  if (destinationJourneys.length === 0) {
+    if (error) {
+      return (
+        <div className="space-y-1">
+          <p className="text-xs text-orange-600">{error}</p>
+          {onRetry && (
+            <button onClick={onRetry} className="text-xs text-blue-600 hover:underline">
+              ↺ Erneut versuchen
+            </button>
+          )}
+        </div>
+      );
+    }
+    return <p className="text-xs text-gray-400">Kein Ziel konfiguriert</p>;
+  }
+
+  const active = destinationJourneys[activeIdx] ?? destinationJourneys[0];
+  const hasAnyError = destinationJourneys.some((dj) => dj.error && !dj.journey);
+
+  return (
+    <div className="space-y-2">
+      {destinationJourneys.length > 1 && (
+        <div className="flex gap-1.5">
+          {destinationJourneys.map((dj, i) => (
+            <button
+              key={dj.destinationId}
+              onClick={() => setActiveIdx(i)}
+              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                i === activeIdx
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {dj.destinationName}
+            </button>
+          ))}
+        </div>
+      )}
+      {active.journey ? (
+        <JourneyResultView journey={active.journey} />
+      ) : (
+        <div className="space-y-1">
+          <p className="text-xs text-orange-600">{active.error ?? 'Keine Route gefunden'}</p>
+          {onRetry && (
+            <button onClick={onRetry} className="text-xs text-blue-600 hover:underline">
+              ↺ Erneut versuchen
+            </button>
+          )}
+        </div>
+      )}
+      {hasAnyError && active.journey && onRetry && (
+        <button onClick={onRetry} className="text-xs text-blue-600 hover:underline">
+          ↺ Alle Routen neu berechnen
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function ListingCard({ result, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney }: Props) {
+  const [showMap, setShowMap] = useState(false);
+  const { id, listing, destinationJourneys, isFavorite, isSelectedForComparison, isLoading, error } = result;
+
+  // Pick score from the first destination that has one
+  const score = destinationJourneys.find((dj) => dj.score !== null)?.score ?? null;
+
+  if (isLoading && !listing) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm flex items-center gap-3">
+        <LoadingSpinner size="md" />
+        <span className="text-sm text-gray-500">Inserat wird analysiert…</span>
+      </div>
+    );
+  }
+
+  if (error && !listing) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm">
+        <p className="text-sm font-medium text-red-700">Fehler: {error}</p>
+        <button onClick={() => onRemove(id)} className="mt-2 text-xs text-red-500 hover:underline">
+          Entfernen
+        </button>
+      </div>
+    );
+  }
+
+  if (!listing) return null;
+
+  return (
+    <div
+      className={`rounded-xl border bg-white shadow-sm overflow-hidden transition-all ${
+        isSelectedForComparison ? 'border-blue-400 ring-2 ring-blue-200' : 'border-gray-200'
+      }`}
+    >
+      {/* Header */}
+      <div className="p-4 pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-gray-900 truncate" title={listing.title}>
+              {listing.title}
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5 truncate" title={listing.address}>
+              📍 {listing.address}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-1">
+            <button
+              onClick={() => onToggleFavorite(id, !isFavorite)}
+              title={isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen'}
+              className={`p-1.5 rounded-lg text-base transition-colors ${
+                isFavorite ? 'text-yellow-500 bg-yellow-50' : 'text-gray-300 hover:text-yellow-400'
+              }`}
+            >
+              ★
+            </button>
+            <button
+              onClick={() => onRemove(id)}
+              title="Entfernen"
+              className="p-1.5 rounded-lg text-gray-300 hover:text-red-400 transition-colors text-sm"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-3">
+          {listing.warmRent !== null && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+              💶 {listing.warmRent} €
+            </span>
+          )}
+          {listing.size !== null && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-2.5 py-1 text-xs font-semibold text-purple-700">
+              📐 {listing.size} m²
+            </span>
+          )}
+          {listing.warmRent && listing.size ? (
+            <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-600">
+              {Math.round(listing.warmRent / listing.size)} €/m²
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Journey */}
+      <div className="px-4 pb-3 border-t border-gray-100 pt-3">
+        <JourneySection
+          destinationJourneys={destinationJourneys}
+          isLoading={isLoading}
+          error={error}
+          onRetry={() => onRetryJourney(id)}
+        />
+      </div>
+
+      {/* Score */}
+      {score !== null && (
+        <div className="px-4 pb-3">
+          <ScoreBar score={score} />
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="px-4 pb-3 pt-1 flex items-center justify-between border-t border-gray-100">
+        <div className="flex gap-2">
+          {listing.lat && listing.lng && (
+            <button
+              onClick={() => setShowMap(!showMap)}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              {showMap ? 'Karte ausblenden' : '🗺️ Karte'}
+            </button>
+          )}
+          <a
+            href={listing.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-gray-500 hover:underline"
+          >
+            Inserat ↗
+          </a>
+        </div>
+        <button
+          onClick={() => onToggleComparison(id)}
+          className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${
+            isSelectedForComparison
+              ? 'bg-blue-100 text-blue-700'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          {isSelectedForComparison ? '✓ Vergleich' : 'Vergleichen'}
+        </button>
+      </div>
+
+      {/* Map */}
+      {showMap && listing.lat && listing.lng && (
+        <div className="px-4 pb-4">
+          <ListingMap
+            lat={listing.lat}
+            lng={listing.lng}
+            title={listing.title}
+            destinations={destinations}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
