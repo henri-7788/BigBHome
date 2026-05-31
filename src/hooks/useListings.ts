@@ -10,7 +10,8 @@ type Action =
   | { type: 'UPDATE'; id: string; payload: Partial<ListingResult> }
   | { type: 'REMOVE'; id: string }
   | { type: 'SET_FAVORITE'; id: string; value: boolean }
-  | { type: 'TOGGLE_COMPARISON'; id: string };
+  | { type: 'TOGGLE_COMPARISON'; id: string }
+  | { type: 'SET_OFFLINE'; id: string; value: boolean };
 
 function reducer(state: ListingResult[], action: Action): ListingResult[] {
   switch (action.type) {
@@ -26,6 +27,7 @@ function reducer(state: ListingResult[], action: Action): ListingResult[] {
           isSelectedForComparison: false,
           isLoading: true,
           error: null,
+          isOffline: false,
         },
         ...state,
       ];
@@ -39,6 +41,8 @@ function reducer(state: ListingResult[], action: Action): ListingResult[] {
       return state.map((r) =>
         r.id === action.id ? { ...r, isSelectedForComparison: !r.isSelectedForComparison } : r,
       );
+    case 'SET_OFFLINE':
+      return state.map((r) => (r.id === action.id ? { ...r, isOffline: action.value } : r));
     default:
       return state;
   }
@@ -69,7 +73,6 @@ export function useListings() {
     },
   ) => {
     dispatch({ type: 'UPDATE', id, payload });
-    // Persist once the listing is fully loaded
     if (payload.isLoading === false && payload.listing) {
       db.upsertListing(id, payload.listing, payload.destinationJourneys ?? [], false).catch(
         (err) => console.error('DB upsert error:', err),
@@ -89,5 +92,10 @@ export function useListings() {
 
   const toggleComparison = (id: string) => dispatch({ type: 'TOGGLE_COMPARISON', id });
 
-  return { listings, dbLoaded, addListing, updateListing, removeListing, toggleFavorite, toggleComparison };
+  const toggleOffline = (id: string, newValue: boolean) => {
+    dispatch({ type: 'SET_OFFLINE', id, value: newValue });
+    db.updateOfflineStatus(id, newValue).catch((err) => console.error('DB offline error:', err));
+  };
+
+  return { listings, dbLoaded, addListing, updateListing, removeListing, toggleFavorite, toggleComparison, toggleOffline };
 }

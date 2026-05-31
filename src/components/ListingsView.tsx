@@ -14,7 +14,7 @@ import { ComparisonTable } from './ComparisonTable';
 import { LoadingSpinner } from './LoadingSpinner';
 
 export function ListingsView() {
-  const { listings, dbLoaded, addListing, updateListing, removeListing, toggleFavorite, toggleComparison } =
+  const { listings, dbLoaded, addListing, updateListing, removeListing, toggleFavorite, toggleComparison, toggleOffline } =
     useListings();
   const { destinations, loaded: destsLoaded, addDestination, removeDestination } = useDestinations();
   const { settings, updateSettings } = useSettings();
@@ -177,6 +177,7 @@ export function ListingsView() {
             onToggleComparison={toggleComparison}
             onRetryJourney={handleRetryJourney}
             onRetryDestinationJourney={handleRetryDestinationJourney}
+            onToggleOffline={toggleOffline}
           />
 
           {listings.length === 0 && (

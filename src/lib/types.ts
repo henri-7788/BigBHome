@@ -8,6 +8,7 @@ export interface ScrapedListing {
   lat: number | null;
   lng: number | null;
   scrapedAt: string;
+  isOffline?: boolean;
 }
 
 export interface JourneyLeg {
@@ -51,6 +52,7 @@ export interface ListingResult {
   isSelectedForComparison: boolean;
   isLoading: boolean;
   error: string | null;
+  isOffline: boolean;
 }
 
 export interface ScrapeRequest {

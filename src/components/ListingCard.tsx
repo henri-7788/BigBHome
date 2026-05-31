@@ -17,6 +17,7 @@ interface Props {
   onToggleComparison: (id: string) => void;
   onRetryJourney: (id: string) => void;
   onRetryDestinationJourney: (listingId: string, destinationId: string) => Promise<void>;
+  onToggleOffline: (id: string, newValue: boolean) => void;
 }
 
 function JourneySection({
@@ -132,9 +133,9 @@ function JourneySection({
   );
 }
 
-export function ListingCard({ result, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney, onRetryDestinationJourney }: Props) {
+export function ListingCard({ result, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney, onRetryDestinationJourney, onToggleOffline }: Props) {
   const [showMap, setShowMap] = useState(false);
-  const { id, listing, destinationJourneys, isFavorite, isSelectedForComparison, isLoading, error } = result;
+  const { id, listing, destinationJourneys, isFavorite, isSelectedForComparison, isLoading, error, isOffline } = result;
 
   // Pick score from the first destination that has one
   const score = destinationJourneys.find((dj) => dj.score !== null)?.score ?? null;
@@ -164,9 +165,19 @@ export function ListingCard({ result, destinations, onRemove, onToggleFavorite, 
   return (
     <div
       className={`rounded-xl border bg-white shadow-sm overflow-hidden transition-all ${
-        isSelectedForComparison ? 'border-blue-400 ring-2 ring-blue-200' : 'border-gray-200'
+        isOffline
+          ? 'border-gray-200 opacity-60 grayscale'
+          : isSelectedForComparison
+          ? 'border-blue-400 ring-2 ring-blue-200'
+          : 'border-gray-200'
       }`}
     >
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="bg-gray-100 border-b border-gray-200 px-4 py-1.5 flex items-center gap-1.5">
+          <span className="text-xs text-gray-500 font-medium">Nicht mehr online</span>
+        </div>
+      )}
       {/* Header */}
       <div className="p-4 pb-3">
         <div className="flex items-start justify-between gap-2">
@@ -255,16 +266,29 @@ export function ListingCard({ result, destinations, onRemove, onToggleFavorite, 
             Inserat ↗
           </a>
         </div>
-        <button
-          onClick={() => onToggleComparison(id)}
-          className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${
-            isSelectedForComparison
-              ? 'bg-blue-100 text-blue-700'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          {isSelectedForComparison ? '✓ Vergleich' : 'Vergleichen'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onToggleOffline(id, !isOffline)}
+            title={isOffline ? 'Als online markieren' : 'Als offline markieren'}
+            className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${
+              isOffline
+                ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}
+          >
+            {isOffline ? '↺ Online' : '⊘ Offline'}
+          </button>
+          <button
+            onClick={() => onToggleComparison(id)}
+            className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${
+              isSelectedForComparison
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {isSelectedForComparison ? '✓ Vergleich' : 'Vergleichen'}
+          </button>
+        </div>
       </div>
 
       {/* Map */}

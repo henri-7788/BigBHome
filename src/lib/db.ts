@@ -32,6 +32,7 @@ function rowToListingResult(row: ListingRow): ListingResult {
     isSelectedForComparison: false,
     isLoading: false,
     error: null,
+    isOffline: row.listing_data?.isOffline ?? false,
   };
 }
 
@@ -60,6 +61,20 @@ export async function upsertListing(
     destination_journeys: destinationJourneys,
     is_favorite: isFavorite,
   });
+  if (error) throw error;
+}
+
+export async function updateOfflineStatus(id: string, isOffline: boolean): Promise<void> {
+  const { data, error: fetchError } = await supabase
+    .from('wg_listings')
+    .select('listing_data')
+    .eq('id', id)
+    .single();
+  if (fetchError || !data) return;
+  const { error } = await supabase
+    .from('wg_listings')
+    .update({ listing_data: { ...(data as ListingRow).listing_data, isOffline } })
+    .eq('id', id);
   if (error) throw error;
 }
 
