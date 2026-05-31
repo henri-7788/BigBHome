@@ -16,6 +16,7 @@ interface Props {
   onToggleFavorite: (id: string, newValue: boolean) => void;
   onToggleComparison: (id: string) => void;
   onRetryJourney: (id: string) => void;
+  onRetryDestinationJourney: (listingId: string, destinationId: string) => Promise<void>;
 }
 
 function JourneySection({
@@ -23,13 +24,30 @@ function JourneySection({
   isLoading,
   error,
   onRetry,
+  onRetryDestination,
 }: {
   destinationJourneys: DestinationJourney[];
   isLoading: boolean;
   error: string | null;
   onRetry?: () => void;
+  onRetryDestination?: (destinationId: string) => Promise<void>;
 }) {
   const [activeIdx, setActiveIdx] = useState(0);
+  const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
+
+  const handleRefreshDestination = async (destinationId: string) => {
+    if (!onRetryDestination || refreshingIds.has(destinationId)) return;
+    setRefreshingIds((prev) => new Set([...prev, destinationId]));
+    try {
+      await onRetryDestination(destinationId);
+    } finally {
+      setRefreshingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(destinationId);
+        return next;
+      });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -61,23 +79,38 @@ function JourneySection({
 
   return (
     <div className="space-y-2">
-      {destinationJourneys.length > 1 && (
-        <div className="flex gap-1.5">
-          {destinationJourneys.map((dj, i) => (
+      <div className="flex flex-wrap gap-1.5">
+        {destinationJourneys.map((dj, i) => (
+          <div key={dj.destinationId} className="flex items-center gap-0.5">
             <button
-              key={dj.destinationId}
               onClick={() => setActiveIdx(i)}
               className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                i === activeIdx
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                destinationJourneys.length > 1
+                  ? i === activeIdx
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-600 cursor-default'
               }`}
             >
               {dj.destinationName}
             </button>
-          ))}
-        </div>
-      )}
+            <button
+              onClick={() => handleRefreshDestination(dj.destinationId)}
+              disabled={refreshingIds.has(dj.destinationId)}
+              title={`Route für ${dj.destinationName} neu berechnen`}
+              className="flex items-center justify-center w-5 h-5 rounded-full text-gray-400 hover:text-blue-500 hover:bg-gray-100 disabled:opacity-40 transition-colors"
+            >
+              {refreshingIds.has(dj.destinationId) ? (
+                <LoadingSpinner size="sm" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                  <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08.932.75.75 0 0 1-1.3-.75 6 6 0 0 1 9.44-1.242l.842.84V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.241l-.84-.84v1.371a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.841.841a4.5 4.5 0 0 0 7.08-.932.75.75 0 0 1 1.025-.273Z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+          </div>
+        ))}
+      </div>
       {active.journey ? (
         <JourneyResultView journey={active.journey} />
       ) : (
@@ -99,7 +132,7 @@ function JourneySection({
   );
 }
 
-export function ListingCard({ result, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney }: Props) {
+export function ListingCard({ result, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney, onRetryDestinationJourney }: Props) {
   const [showMap, setShowMap] = useState(false);
   const { id, listing, destinationJourneys, isFavorite, isSelectedForComparison, isLoading, error } = result;
 
@@ -191,6 +224,7 @@ export function ListingCard({ result, destinations, onRemove, onToggleFavorite, 
           isLoading={isLoading}
           error={error}
           onRetry={() => onRetryJourney(id)}
+          onRetryDestination={(destinationId) => onRetryDestinationJourney(id, destinationId)}
         />
       </div>
 

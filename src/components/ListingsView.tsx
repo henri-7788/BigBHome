@@ -72,6 +72,59 @@ export function ListingsView() {
     [listings, destinations, settings, updateListing],
   );
 
+  const handleRetryDestinationJourney = useCallback(
+    async (listingId: string, destinationId: string) => {
+      const current = listings.find((l) => l.id === listingId);
+      if (!current?.listing?.lat || !current?.listing?.lng) return;
+
+      const dest = destinations.find((d) => d.id === destinationId);
+      if (!dest) return;
+
+      let updatedDj: DestinationJourney;
+      try {
+        const res = await fetch('/api/journey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fromLat: current.listing.lat,
+            fromLng: current.listing.lng,
+            fromAddress: current.listing.address,
+            toLat: dest.lat,
+            toLng: dest.lng,
+            toAddress: dest.address,
+            settings,
+          }),
+        });
+        const data: JourneyResponse = await res.json();
+        updatedDj = {
+          destinationId: dest.id,
+          destinationName: dest.name,
+          journey: data.success && data.data ? data.data : null,
+          score: data.success && data.data ? calculateScore(current.listing, data.data) : null,
+          error: data.success ? null : (data.error ?? 'Fehler'),
+        };
+      } catch {
+        updatedDj = {
+          destinationId: dest.id,
+          destinationName: dest.name,
+          journey: null,
+          score: null,
+          error: 'Netzwerkfehler',
+        };
+      }
+
+      const updatedJourneys = current.destinationJourneys.map((dj) =>
+        dj.destinationId === destinationId ? updatedDj : dj,
+      );
+      updateListing(listingId, {
+        listing: current.listing,
+        destinationJourneys: updatedJourneys,
+        isLoading: false,
+      });
+    },
+    [listings, destinations, settings, updateListing],
+  );
+
   const comparisonListings = listings.filter((l) => l.isSelectedForComparison && l.listing);
   const showComparison = comparisonListings.length >= 2;
   const isInitializing = !dbLoaded || !destsLoaded;
@@ -123,6 +176,7 @@ export function ListingsView() {
             onToggleFavorite={toggleFavorite}
             onToggleComparison={toggleComparison}
             onRetryJourney={handleRetryJourney}
+            onRetryDestinationJourney={handleRetryDestinationJourney}
           />
 
           {listings.length === 0 && (

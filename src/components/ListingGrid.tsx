@@ -8,9 +8,10 @@ interface Props {
   onToggleFavorite: (id: string, newValue: boolean) => void;
   onToggleComparison: (id: string) => void;
   onRetryJourney: (id: string) => void;
+  onRetryDestinationJourney: (listingId: string, destinationId: string) => Promise<void>;
 }
 
-export function ListingGrid({ listings, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney }: Props) {
+export function ListingGrid({ listings, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney, onRetryDestinationJourney }: Props) {
   if (!listings.length) return null;
 
   return (
@@ -24,6 +25,7 @@ export function ListingGrid({ listings, destinations, onRemove, onToggleFavorite
           onToggleFavorite={onToggleFavorite}
           onToggleComparison={onToggleComparison}
           onRetryJourney={onRetryJourney}
+          onRetryDestinationJourney={onRetryDestinationJourney}
         />
       ))}
     </div>

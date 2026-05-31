@@ -28,12 +28,17 @@ export function JourneyResultView({ journey }: { journey: JourneyResult }) {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1 text-gray-800">
           <span className="text-lg">🕐</span>
-          <span className="text-lg font-bold">{journey.durationMinutes} min</span>
+          <span className="text-lg font-bold">
+            {journey.averagedDays ? 'Ø ' : ''}{journey.durationMinutes} min
+          </span>
         </div>
         {journey.transfers === 0 ? (
           <span className="text-xs text-green-600 font-medium">Direkt</span>
         ) : (
           <span className="text-xs text-gray-500">{journey.transfers} Umstieg{journey.transfers > 1 ? 'e' : ''}</span>
+        )}
+        {journey.averagedDays && (
+          <span className="text-xs text-blue-500 font-medium">{journey.averagedDays} Werktage</span>
         )}
       </div>
       <div className="flex flex-wrap gap-1">

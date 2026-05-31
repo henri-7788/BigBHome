@@ -24,6 +24,7 @@ export interface JourneyResult {
   legs: JourneyLeg[];
   departureTime: string;
   arrivalTime: string;
+  averagedDays?: number;
 }
 
 export interface Destination {
