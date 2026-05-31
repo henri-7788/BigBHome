@@ -18,3 +18,13 @@ create table if not exists wg_listings (
   is_favorite          boolean     not null default false,
   created_at           timestamptz not null default now()
 );
+
+create table if not exists wg_suggestions (
+  id           text        primary key,    -- WG-Gesucht numeric listing ID
+  url          text        not null unique,
+  listing_data jsonb,                      -- null when scraping was blocked
+  destination_journeys jsonb not null default '[]'::jsonb,
+  best_score   integer,
+  is_dismissed boolean     not null default false,
+  suggested_at timestamptz not null default now()
+);

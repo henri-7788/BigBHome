@@ -12,6 +12,7 @@ import { UrlInput } from './UrlInput';
 import { ListingGrid } from './ListingGrid';
 import { ComparisonTable } from './ComparisonTable';
 import { LoadingSpinner } from './LoadingSpinner';
+import { SuggestionsPanel } from './SuggestionsPanel';
 
 export function ListingsView() {
   const { listings, dbLoaded, addListing, updateListing, removeListing, toggleFavorite, toggleComparison, toggleOffline } =
@@ -140,6 +141,11 @@ export function ListingsView() {
       )}
 
       <SettingsPanel settings={settings} onChange={updateSettings} />
+
+      <SuggestionsPanel
+        onAddListing={addListing}
+        onUpdateListing={updateListing}
+      />
 
       <UrlInput
         destinations={destinations}
