@@ -91,6 +91,15 @@ export async function deleteListing(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function listingUrlExists(url: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('wg_listings')
+    .select('id')
+    .eq('url', url)
+    .maybeSingle();
+  return data !== null;
+}
+
 // ─── Destinations ─────────────────────────────────────────────────────────────
 
 export async function fetchDestinations(): Promise<Destination[]> {

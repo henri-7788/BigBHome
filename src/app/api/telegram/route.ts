@@ -90,6 +90,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  const alreadyExists = await db.listingUrlExists(url);
+  if (alreadyExists) {
+    await sendMessage(chatId, `⚠️ Dieses Inserat wurde bereits gespeichert.\n\n<a href="${url}">Zum Inserat ↗</a>`);
+    return NextResponse.json({ ok: true });
+  }
+
   await sendMessage(chatId, '🔍 Inserat wird verarbeitet…');
 
   try {
