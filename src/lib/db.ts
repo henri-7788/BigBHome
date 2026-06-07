@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Destination, DestinationJourney, ListingResult, ScrapedListing, Suggestion } from './types';
+import { Destination, DestinationJourney, ListingResult, ScrapedListing } from './types';
 
 // ─── DB row shapes ────────────────────────────────────────────────────────────
 
@@ -125,78 +125,3 @@ export async function deleteDestination(id: string): Promise<void> {
   if (error) throw error;
 }
 
-// ─── Suggestions ──────────────────────────────────────────────────────────────
-
-interface SuggestionRow {
-  id: string;
-  url: string;
-  listing_data: ScrapedListing | null;
-  destination_journeys: DestinationJourney[];
-  best_score: number | null;
-  suggested_at: string;
-}
-
-function rowToSuggestion(row: SuggestionRow): Suggestion {
-  return {
-    id: row.id,
-    url: row.url,
-    listing: row.listing_data,
-    destinationJourneys: row.destination_journeys ?? [],
-    bestScore: row.best_score,
-    suggestedAt: row.suggested_at,
-  };
-}
-
-export async function fetchSuggestions(): Promise<Suggestion[]> {
-  const { data, error } = await supabase
-    .from('wg_suggestions')
-    .select('*')
-    .eq('is_dismissed', false)
-    .order('best_score', { ascending: false, nullsFirst: false });
-  if (error) throw error;
-  return (data as SuggestionRow[]).map(rowToSuggestion);
-}
-
-export async function upsertSuggestion(
-  id: string,
-  url: string,
-  listing: ScrapedListing | null,
-  destinationJourneys: DestinationJourney[],
-  bestScore: number | null,
-): Promise<void> {
-  const { error } = await supabase.from('wg_suggestions').upsert({
-    id,
-    url,
-    listing_data: listing,
-    destination_journeys: destinationJourneys,
-    best_score: bestScore,
-    is_dismissed: false,
-  });
-  if (error) throw error;
-}
-
-export async function dismissSuggestion(id: string): Promise<void> {
-  const { error } = await supabase
-    .from('wg_suggestions')
-    .update({ is_dismissed: true })
-    .eq('id', id);
-  if (error) throw error;
-}
-
-export async function suggestionExists(id: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('wg_suggestions')
-    .select('id')
-    .eq('id', id)
-    .maybeSingle();
-  return data !== null;
-}
-
-export async function listingUrlExists(url: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('wg_listings')
-    .select('id')
-    .eq('url', url)
-    .maybeSingle();
-  return data !== null;
-}

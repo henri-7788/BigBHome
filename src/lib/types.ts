@@ -93,25 +93,3 @@ export interface GeocodeResponse {
   lng?: number;
   error?: string;
 }
-
-export interface Suggestion {
-  id: string;
-  url: string;
-  listing: ScrapedListing | null;
-  destinationJourneys: DestinationJourney[];
-  bestScore: number | null;
-  suggestedAt: string;
-}
-
-export interface ScanSuggestionRequest {
-  url: string;
-  minScore?: number;
-}
-
-export interface ScanSuggestionResponse {
-  success: boolean;
-  saved: boolean;
-  score?: number | null;
-  reason?: string;
-  error?: string;
-}
