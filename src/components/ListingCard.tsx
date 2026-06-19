@@ -135,7 +135,19 @@ function JourneySection({
 
 export function ListingCard({ result, destinations, onRemove, onToggleFavorite, onToggleComparison, onRetryJourney, onRetryDestinationJourney, onToggleOffline }: Props) {
   const [showMap, setShowMap] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
   const { id, listing, destinationJourneys, isFavorite, isSelectedForComparison, isLoading, error, isOffline } = result;
+
+  const handleCopyAddress = async () => {
+    if (!listing) return;
+    try {
+      await navigator.clipboard.writeText(listing.address);
+      setAddressCopied(true);
+      setTimeout(() => setAddressCopied(false), 1500);
+    } catch {
+      // clipboard unavailable, ignore
+    }
+  };
 
   // Pick score from the first destination that has one
   const score = destinationJourneys.find((dj) => dj.score !== null)?.score ?? null;
@@ -185,9 +197,17 @@ export function ListingCard({ result, destinations, onRemove, onToggleFavorite, 
             <h3 className="text-sm font-semibold text-gray-900 truncate" title={listing.title}>
               {listing.title}
             </h3>
-            <p className="text-xs text-gray-500 mt-0.5 truncate" title={listing.address}>
-              📍 {listing.address}
-            </p>
+            <button
+              onClick={handleCopyAddress}
+              title="Adresse kopieren"
+              className="block w-full text-left text-xs text-gray-500 mt-0.5 truncate hover:text-blue-600 transition-colors"
+            >
+              {addressCopied ? (
+                <span className="text-green-600 font-medium">✓ Adresse kopiert</span>
+              ) : (
+                <>📍 {listing.address}</>
+              )}
+            </button>
           </div>
           <div className="flex shrink-0 gap-1">
             <button
