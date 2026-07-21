@@ -1,0 +1,71 @@
+# OpenTripPlanner sidecar for the commute heatmap feature.
+# Official usage reference: https://docs.opentripplanner.org/en/dev-2.x/Container-Image/
+#
+# Deploying this whole stack (e.g. as a Portainer stack) downloads the Berlin GTFS/OSM
+# data and builds the OTP graph automatically on first start — no host shell access needed.
+# Rebuilds the graph on every (re)deploy (a few minutes); if you have shell access and want
+# to skip that, use `npm run otp:download && npm run otp:build` once instead and drop the
+# otp-download/otp-build services below.
+services:
+  otp-download:
+    image: curlimages/curl:latest
+    container_name: commute-otp-download
+    user: "0:0"
+    volumes:
+      - ./graphs/berlin:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        cd /data
+        [ -f osm.pbf ] || curl -fL "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf" -o osm.pbf
+        [ -f vbb-gtfs.zip ] || curl -fL "https://vbb.de/vbbgtfs" -o vbb-gtfs.zip
+    restart: "no"
+
+  otp-build:
+    image: docker.io/opentripplanner/opentripplanner:latest
+    container_name: commute-otp-build
+    depends_on:
+      otp-download:
+        condition: service_completed_successfully
+    environment:
+      - JAVA_TOOL_OPTIONS=-Xmx4g
+    volumes:
+      - ./graphs/berlin:/var/opentripplanner
+    command: ["--build", "--save"]
+    restart: "no"
+
+  otp:
+    image: docker.io/opentripplanner/opentripplanner:latest
+    container_name: commute-otp
+    depends_on:
+      otp-build:
+        condition: service_completed_successfully
+    ports:
+      # Host port is configurable since 8080 may already be taken (e.g. by Portainer itself).
+      - "${OTP_HOST_PORT:-8090}:8080"
+    environment:
+      - JAVA_TOOL_OPTIONS=-Xmx4g
+    volumes:
+      - ./graphs/berlin:/var/opentripplanner
+    command: ["--load", "--serve"]
+
+  # Runs recompute jobs dispatched from the Vercel-hosted app (see
+  # src/app/api/commute/recompute/route.ts). Needed because Vercel serverless functions
+  # can't run a multi-minute job; this container has no such limit and talks to OTP
+  # directly over the compose network (http://otp:8080), no public port needed for that.
+  commute-worker:
+    build:
+      context: ..
+      dockerfile: otp/worker/Dockerfile
+    container_name: commute-worker
+    depends_on:
+      - otp
+    ports:
+      - "${COMMUTE_WORKER_PORT:-8091}:8091"
+    environment:
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      - OTP_BASE_URL=http://otp:8080
+      - COMMUTE_GRID_SPACING_METERS=${COMMUTE_GRID_SPACING_METERS:-500}
+      - COMMUTE_WEBHOOK_SECRET=${COMMUTE_WEBHOOK_SECRET}

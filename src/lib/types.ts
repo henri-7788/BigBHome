@@ -93,3 +93,66 @@ export interface GeocodeResponse {
   lng?: number;
   error?: string;
 }
+
+// ─── Commute Heatmap ───────────────────────────────────────────────────────────
+
+export interface CommuteScheduleEntry {
+  weekday: number; // 1 (Monday) – 7 (Sunday), ISO-8601
+  time: string; // HH:MM
+  timeMode: 'departure' | 'arrival';
+}
+
+export interface CommuteDestination {
+  id: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  weight: number; // relative importance, 1-100
+  schedule: CommuteScheduleEntry[];
+}
+
+export interface GridCell {
+  id: string;
+  lat: number;
+  lng: number;
+}
+
+export interface CommuteTravelTime {
+  cellId: string;
+  destinationId: string;
+  weekday: number;
+  targetTime: string;
+  durationMinutes: number | null;
+  transfers: number | null;
+  legs: JourneyLeg[] | null;
+}
+
+export interface CommuteJob {
+  id: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  totalCells: number;
+  completedCells: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommuteCellScore {
+  cellId: string;
+  lat: number;
+  lng: number;
+  score: number | null; // null = unreachable for at least one destination
+  perDestination: {
+    destinationId: string;
+    durationMinutes: number | null;
+    transfers: number | null;
+    legs: JourneyLeg[] | null;
+  }[];
+}
+
+export interface TransportModePreference {
+  walk: boolean;
+  bike: boolean;
+  transit: boolean;
+}
