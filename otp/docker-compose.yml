@@ -1,11 +1,12 @@
 # OpenTripPlanner sidecar for the commute heatmap feature.
 # Official usage reference: https://docs.opentripplanner.org/en/dev-2.x/Container-Image/
 #
-# Deploying this whole stack (e.g. as a Portainer stack) downloads the Berlin GTFS/OSM
-# data and builds the OTP graph automatically on first start — no host shell access needed.
-# Rebuilds the graph on every (re)deploy (a few minutes); if you have shell access and want
-# to skip that, use `npm run otp:download && npm run otp:build` once instead and drop the
-# otp-download/otp-build services below.
+# Deploying this stack (e.g. as a Portainer stack) downloads the Berlin GTFS/OSM data and
+# builds the OTP graph automatically — no host shell access needed. Deliberately uses
+# "start, then retry until it works" instead of blocking depends_on/health conditions:
+# `docker compose up -d` must return in seconds for Portainer's deploy request to succeed,
+# but downloading ~1-2GB and building the graph takes many minutes. otp-build and otp will
+# fail and auto-restart a few times until their inputs exist — that's expected, not an error.
 services:
   otp-download:
     image: curlimages/curl:latest
@@ -18,29 +19,29 @@ services:
       - |
         set -e
         cd /data
-        [ -f osm.pbf ] || curl -fL "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf" -o osm.pbf
-        [ -f vbb-gtfs.zip ] || curl -fL "https://vbb.de/vbbgtfs" -o vbb-gtfs.zip
-    restart: "no"
+        [ -f osm.pbf ] || curl -fL "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf" -o osm.pbf.tmp && mv osm.pbf.tmp osm.pbf
+        [ -f vbb-gtfs.zip ] || curl -fL "https://vbb.de/vbbgtfs" -o vbb-gtfs.zip.tmp && mv vbb-gtfs.zip.tmp vbb-gtfs.zip
+    restart: on-failure:5
 
   otp-build:
     image: docker.io/opentripplanner/opentripplanner:latest
     container_name: commute-otp-build
     depends_on:
-      otp-download:
-        condition: service_completed_successfully
+      - otp-download
     environment:
       - JAVA_TOOL_OPTIONS=-Xmx4g
     volumes:
       - ./graphs/berlin:/var/opentripplanner
     command: ["--build", "--save"]
-    restart: "no"
+    # Fails fast if osm.pbf/vbb-gtfs.zip aren't downloaded yet — retries with backoff until
+    # otp-download finishes, then exits 0 and stops (no more restarts needed after success).
+    restart: on-failure:30
 
   otp:
     image: docker.io/opentripplanner/opentripplanner:latest
     container_name: commute-otp
     depends_on:
-      otp-build:
-        condition: service_completed_successfully
+      - otp-build
     ports:
       # Host port is configurable since 8080 may already be taken (e.g. by Portainer itself).
       - "${OTP_HOST_PORT:-8090}:8080"
@@ -49,6 +50,8 @@ services:
     volumes:
       - ./graphs/berlin:/var/opentripplanner
     command: ["--load", "--serve"]
+    # Fails fast if graph.obj doesn't exist yet — keeps retrying until otp-build finishes.
+    restart: unless-stopped
 
   # Runs recompute jobs dispatched from the Vercel-hosted app (see
   # src/app/api/commute/recompute/route.ts). Needed because Vercel serverless functions
@@ -59,6 +62,7 @@ services:
       context: ..
       dockerfile: otp/worker/Dockerfile
     container_name: commute-worker
+    restart: unless-stopped
     depends_on:
       - otp
     ports:

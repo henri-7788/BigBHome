@@ -1,0 +1,8 @@
+{
+  "name": "commute-worker",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
+    "tsx": "^4.23.1"
+  }
+}
