@@ -43,8 +43,9 @@ services:
     depends_on:
       - otp-build
     ports:
-      # Host port is configurable since 8080 may already be taken (e.g. by Portainer itself).
-      - "${OTP_HOST_PORT:-8090}:8080"
+      # Host port is configurable — change OTP_HOST_PORT if this default collides with
+      # something else already running on your host.
+      - "${OTP_HOST_PORT:-8095}:8080"
     environment:
       - JAVA_TOOL_OPTIONS=-Xmx4g
     volumes:
@@ -66,7 +67,7 @@ services:
     depends_on:
       - otp
     ports:
-      - "${COMMUTE_WORKER_PORT:-8091}:8091"
+      - "${COMMUTE_WORKER_PORT:-8096}:8091"
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
