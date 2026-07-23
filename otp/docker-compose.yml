@@ -74,3 +74,7 @@ services:
       - OTP_BASE_URL=http://otp:8080
       - COMMUTE_GRID_SPACING_METERS=${COMMUTE_GRID_SPACING_METERS:-500}
       - COMMUTE_WEBHOOK_SECRET=${COMMUTE_WEBHOOK_SECRET}
+      # How many OTP requests the worker fires at once. Keep at or below OTP's own HTTP
+      # handler thread pool size (roughly your host's CPU count) or searches start timing
+      # out from contention instead of running faster.
+      - COMMUTE_OTP_CONCURRENCY=${COMMUTE_OTP_CONCURRENCY:-3}

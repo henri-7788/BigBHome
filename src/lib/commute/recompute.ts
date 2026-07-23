@@ -13,7 +13,10 @@ function toOtpTransportModes(prefs?: TransportModePreference): { mode: string }[
   return modes.length > 0 ? modes : [{ mode: 'WALK' }, { mode: 'TRANSIT' }];
 }
 
-const CONCURRENCY = 8;
+// OTP's own HTTP handler thread pool is sized to the host's CPU count (often small on a
+// VPS) — pushing more concurrent requests than that just causes contention and search
+// timeouts inside OTP, not faster throughput. Tune via COMMUTE_OTP_CONCURRENCY if needed.
+const CONCURRENCY = Number(process.env.COMMUTE_OTP_CONCURRENCY ?? '3');
 
 /** Runs a bounded number of tasks concurrently, waiting for all to settle. */
 async function runWithConcurrency<T>(
