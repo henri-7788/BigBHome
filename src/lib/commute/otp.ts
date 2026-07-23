@@ -36,37 +36,44 @@ function mapMode(otpMode: string): JourneyLeg['mode'] {
   return MODE_MAP[otpMode] ?? 'bus';
 }
 
-const PLAN_QUERY = `
-  query Plan(
-    $fromLat: Float!, $fromLon: Float!,
-    $toLat: Float!, $toLon: Float!,
-    $date: String!, $time: String!, $arriveBy: Boolean!,
-    $transportModes: [TransportModeInput!]!
-  ) {
-    plan(
-      from: { lat: $fromLat, lon: $fromLon }
-      to: { lat: $toLat, lon: $toLon }
-      date: $date
-      time: $time
-      arriveBy: $arriveBy
-      numItineraries: 1
-      transportModes: $transportModes
+// transportModes is inlined into the query text rather than passed as a typed GraphQL
+// variable — its exact input type name in OTP's schema is unconfirmed (introspection is
+// blocked by OTP's anti-abuse "BadFaithIntrospection" guard), but literal `mode: WALK`
+// syntax is confirmed working against a live server. Modes only ever come from our own
+// toOtpTransportModes()/DEFAULT_TRANSPORT_MODES (a fixed enum whitelist), never user input.
+function buildPlanQuery(modes: { mode: string }[]): string {
+  const modesLiteral = `[${modes.map((m) => `{mode: ${m.mode}}`).join(', ')}]`;
+  return `
+    query Plan(
+      $fromLat: Float!, $fromLon: Float!,
+      $toLat: Float!, $toLon: Float!,
+      $date: String!, $time: String!, $arriveBy: Boolean!
     ) {
-      itineraries {
-        startTime
-        endTime
-        legs {
-          mode
-          route { shortName }
-          from { name }
-          to { name }
+      plan(
+        from: { lat: $fromLat, lon: $fromLon }
+        to: { lat: $toLat, lon: $toLon }
+        date: $date
+        time: $time
+        arriveBy: $arriveBy
+        numItineraries: 1
+        transportModes: ${modesLiteral}
+      ) {
+        itineraries {
           startTime
           endTime
+          legs {
+            mode
+            route { shortName }
+            from { name }
+            to { name }
+            startTime
+            endTime
+          }
         }
       }
     }
-  }
-`;
+  `;
+}
 
 export interface PlanTripParams {
   fromLat: number;
@@ -85,12 +92,13 @@ const DEFAULT_TRANSPORT_MODES = [{ mode: 'WALK' }, { mode: 'TRANSIT' }];
 /** Queries OTP's GraphQL API for a single itinerary and maps it onto our shared JourneyResult shape. */
 export async function planTrip(params: PlanTripParams): Promise<JourneyResult | null> {
   const base = process.env.OTP_BASE_URL ?? 'http://localhost:8080';
+  const modes = params.transportModes ?? DEFAULT_TRANSPORT_MODES;
 
   const res = await fetch(`${base}/otp/routers/default/index/graphql`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      query: PLAN_QUERY,
+      query: buildPlanQuery(modes),
       variables: {
         fromLat: params.fromLat,
         fromLon: params.fromLng,
@@ -99,14 +107,21 @@ export async function planTrip(params: PlanTripParams): Promise<JourneyResult | 
         date: params.date,
         time: params.time,
         arriveBy: params.arriveBy,
-        transportModes: params.transportModes ?? DEFAULT_TRANSPORT_MODES,
       },
     }),
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.error(`OTP request failed: HTTP ${res.status}`);
+    return null;
+  }
 
   const body: OtpPlanResponse = await res.json();
+  if (body.errors?.length) {
+    console.error('OTP GraphQL errors:', body.errors.map((e) => e.message).join('; '));
+    return null;
+  }
+
   const itinerary = body.data?.plan?.itineraries?.[0];
   if (!itinerary) return null;
 
