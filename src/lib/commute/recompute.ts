@@ -66,10 +66,14 @@ export async function runCommuteRecompute(
     const grid = generateBerlinGrid(spacing, boundary);
     const destinations = await db.fetchCommuteDestinations();
 
+    // Cells are the outer loop so a cell's lookups across all destinations land close
+    // together in the task queue — cells then complete (and get a real score) roughly
+    // in order, instead of finishing all cells for destination 1 before destination 2
+    // even starts (which would leave the map looking empty until near the very end).
     const tasks: RecomputeTask[] = [];
-    for (const dest of destinations) {
-      for (const entry of dest.schedule) {
-        for (const cell of grid) {
+    for (const cell of grid) {
+      for (const dest of destinations) {
+        for (const entry of dest.schedule) {
           tasks.push({
             cellId: cell.id,
             cellLat: cell.lat,
