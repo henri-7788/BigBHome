@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CommuteCellScore, CommuteDestination, CommuteTravelTime, GridCell } from '@/lib/types';
 import { loadBerlinBoundaryClient } from '@/lib/commute/boundary';
 import { generateBerlinGrid } from '@/lib/commute/grid';
@@ -31,11 +31,19 @@ export function useCommuteGrid(destinations: CommuteDestination[], maxMinutes: n
   const [reloadToken, setReloadToken] = useState(0);
   const reloadTravelTimes = () => setReloadToken((t) => t + 1);
 
+  // Only the very first load shows the loading spinner — reloads triggered by live polling
+  // during a running recompute job should fill in the map quietly, without flashing it.
+  const hasLoadedOnceRef = useRef(false);
+
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag for the fetch below
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) {
+      setLoading(true);
+    }
     fetchTravelTimes(destinationIds)
-      .then((rows) => setTravelTimes(rows))
+      .then((rows) => {
+        setTravelTimes(rows);
+        hasLoadedOnceRef.current = true;
+      })
       .catch((err) => console.error('DB travel times load error:', err))
       .finally(() => setLoading(false));
   }, [destinationIds, reloadToken]);

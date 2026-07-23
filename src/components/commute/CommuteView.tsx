@@ -44,7 +44,7 @@ export function CommuteView() {
         <CommuteJobProgress
           disabled={destinations.length === 0}
           transportModes={settings.transportModes}
-          onFinished={reloadTravelTimes}
+          onProgress={reloadTravelTimes}
         />
         <CommuteDetailPanel
           cell={selectedCell}

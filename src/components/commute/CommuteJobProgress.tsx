@@ -7,10 +7,12 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 interface Props {
   disabled: boolean;
   transportModes: TransportModePreference;
-  onFinished: () => void;
+  // Called on every poll tick while a job runs (and once more when it finishes), so the
+  // map can refetch and fill in newly-computed cells live instead of only at the end.
+  onProgress: () => void;
 }
 
-export function CommuteJobProgress({ disabled, transportModes, onFinished }: Props) {
+export function CommuteJobProgress({ disabled, transportModes, onProgress }: Props) {
   const [job, setJob] = useState<CommuteJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -28,9 +30,9 @@ export function CommuteJobProgress({ disabled, transportModes, onFinished }: Pro
         const data = await res.json();
         if (!data.success) return;
         setJob(data.job);
+        onProgress();
         if (data.job.status === 'done' || data.job.status === 'error') {
           if (pollRef.current) clearInterval(pollRef.current);
-          if (data.job.status === 'done') onFinished();
         }
       } catch {
         // transient network error while polling — keep trying
