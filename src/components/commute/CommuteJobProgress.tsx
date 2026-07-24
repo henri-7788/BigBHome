@@ -12,18 +12,19 @@ interface Props {
   onProgress: () => void;
 }
 
+// The recompute job itself runs server-side in the worker, independent of this tab —
+// reloading/leaving the page doesn't stop it. What's stored here is just the job id, so a
+// fresh page load can find and resume polling an already-running job instead of losing
+// track of it (which otherwise looks exactly like the computation stopped).
+const STORAGE_KEY = 'commute-current-job-id';
+
 export function CommuteJobProgress({ disabled, transportModes, onProgress }: Props) {
   const [job, setJob] = useState<CommuteJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
   function pollJob(jobId: string) {
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/commute/jobs/${jobId}`);
@@ -40,6 +41,27 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
     }, 2000);
   }
 
+  useEffect(() => {
+    const storedJobId = localStorage.getItem(STORAGE_KEY);
+    if (!storedJobId) return;
+
+    fetch(`/api/commute/jobs/${storedJobId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.success) return;
+        setJob(data.job);
+        if (data.job.status === 'pending' || data.job.status === 'running') {
+          pollJob(storedJobId);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleRecompute() {
     setError(null);
     setJob(null);
@@ -54,6 +76,7 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
         setError(data.error ?? 'Job konnte nicht gestartet werden');
         return;
       }
+      localStorage.setItem(STORAGE_KEY, data.jobId);
       pollJob(data.jobId);
     } catch {
       setError('Netzwerkfehler');
