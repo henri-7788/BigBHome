@@ -65,6 +65,7 @@ export function CommuteView() {
           <>
             <CommuteHeatmapMap
               cellScores={cellScores}
+              destinations={destinations}
               onCellClick={setSelectedCellId}
               selectedCellId={selectedCellId}
             />

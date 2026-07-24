@@ -3,13 +3,14 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { CommuteCellScore } from '@/lib/types';
+import { CommuteCellScore, CommuteDestination } from '@/lib/types';
 
 const GRID_SPACING_METERS = 500;
 const METERS_PER_DEGREE_LAT = 111_320;
 
 interface Props {
   cellScores: CommuteCellScore[];
+  destinations: CommuteDestination[];
   onCellClick: (cellId: string) => void;
   selectedCellId: string | null;
 }
@@ -50,10 +51,11 @@ const SOURCE_ID = 'commute-grid';
 const FILL_LAYER_ID = 'commute-grid-fill';
 const OUTLINE_LAYER_ID = 'commute-grid-selected-outline';
 
-export function CommuteHeatmapMap({ cellScores, onCellClick, selectedCellId }: Props) {
+export function CommuteHeatmapMap({ cellScores, destinations, onCellClick, selectedCellId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const loadedRef = useRef(false);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -140,6 +142,26 @@ export function CommuteHeatmapMap({ cellScores, onCellClick, selectedCellId }: P
     if (!map || !loadedRef.current) return;
     map.setFilter(OUTLINE_LAYER_ID, ['==', ['get', 'cellId'], selectedCellId ?? '']);
   }, [selectedCellId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = destinations.map((dest) => {
+      const el = document.createElement('div');
+      el.textContent = '📍';
+      el.style.fontSize = '28px';
+      el.style.lineHeight = '1';
+      el.style.cursor = 'default';
+      el.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.5))';
+
+      return new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([dest.lng, dest.lat])
+        .setPopup(new maplibregl.Popup({ offset: 20 }).setText(dest.name))
+        .addTo(map);
+    });
+  }, [destinations]);
 
   return <div ref={containerRef} className="h-full w-full rounded-xl" />;
 }

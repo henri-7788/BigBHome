@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { CommuteDestination, CommuteScheduleEntry, GeocodeResponse } from '@/lib/types';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { AddressAutocomplete, AddressSuggestion } from '@/components/AddressAutocomplete';
 
 const WEEKDAY_LABELS: Record<number, string> = {
   1: 'Mo', 2: 'Di', 3: 'Mi', 4: 'Do', 5: 'Fr', 6: 'Sa', 7: 'So',
@@ -96,9 +97,20 @@ export function CommuteDestinationManager({ destinations, onAdd, onUpdate, onRem
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [schedule, setSchedule] = useState<CommuteScheduleEntry[]>([]);
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleAddressChange = (next: string) => {
+    setAddress(next);
+    setSelectedCoords(null);
+  };
+
+  const handleSelectSuggestion = (suggestion: AddressSuggestion) => {
+    setAddress(suggestion.label);
+    setSelectedCoords({ lat: suggestion.lat, lng: suggestion.lng });
+  };
 
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault();
@@ -111,28 +123,33 @@ export function CommuteDestinationManager({ destinations, onAdd, onUpdate, onRem
 
     setIsGeocoding(true);
     try {
-      const res = await fetch('/api/geocode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address }),
-      });
-      const data: GeocodeResponse = await res.json();
-
-      if (!data.success || data.lat == null || data.lng == null) {
-        setError(data.error ?? 'Adresse nicht gefunden');
-        return;
+      // If a suggestion was picked we already have coordinates — no need to geocode again.
+      let coords = selectedCoords;
+      if (!coords) {
+        const res = await fetch('/api/geocode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address }),
+        });
+        const data: GeocodeResponse = await res.json();
+        if (!data.success || data.lat == null || data.lng == null) {
+          setError(data.error ?? 'Adresse nicht gefunden');
+          return;
+        }
+        coords = { lat: data.lat, lng: data.lng };
       }
 
       onAdd({
         name: name.trim(),
         address: address.trim(),
-        lat: data.lat,
-        lng: data.lng,
+        lat: coords.lat,
+        lng: coords.lng,
         weight: 50,
         schedule,
       });
       setName('');
       setAddress('');
+      setSelectedCoords(null);
       setSchedule([]);
       setShowForm(false);
     } catch {
@@ -220,10 +237,10 @@ export function CommuteDestinationManager({ destinations, onAdd, onUpdate, onRem
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Adresse</label>
-              <input
-                type="text"
+              <AddressAutocomplete
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={handleAddressChange}
+                onSelect={handleSelectSuggestion}
                 placeholder="Musterstraße 1, Berlin"
                 required
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -246,6 +263,7 @@ export function CommuteDestinationManager({ destinations, onAdd, onUpdate, onRem
                 setError(null);
                 setName('');
                 setAddress('');
+                setSelectedCoords(null);
                 setSchedule([]);
               }}
               className="flex-1 rounded-lg border border-gray-300 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
