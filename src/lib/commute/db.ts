@@ -6,6 +6,22 @@ import {
   JourneyLeg,
 } from '@/lib/types';
 
+// The recompute job can run for hours across thousands of Supabase calls. Without a retry,
+// a single transient blip (e.g. a momentary DNS failure) throws and kills the whole job,
+// discarding all progress made so far — so retry a few times with backoff before giving up.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+    }
+  }
+  throw lastErr;
+}
+
 // ─── DB row shapes ────────────────────────────────────────────────────────────
 
 interface CommuteDestinationRow {
@@ -78,13 +94,15 @@ function rowToJob(row: CommuteJobRow): CommuteJob {
 // ─── Destinations ─────────────────────────────────────────────────────────────
 
 export async function fetchCommuteDestinations(): Promise<CommuteDestination[]> {
-  const { data, error } = await supabase
-    .from('commute_destinations')
-    .select('*')
-    .order('created_at', { ascending: true });
+  return withRetry(async () => {
+    const { data, error } = await supabase
+      .from('commute_destinations')
+      .select('*')
+      .order('created_at', { ascending: true });
 
-  if (error) throw error;
-  return (data as CommuteDestinationRow[]).map(rowToDestination);
+    if (error) throw error;
+    return (data as CommuteDestinationRow[]).map(rowToDestination);
+  });
 }
 
 export async function insertCommuteDestination(dest: CommuteDestination): Promise<void> {
@@ -134,16 +152,18 @@ export async function fetchTravelTimes(destinationIds: string[]): Promise<Commut
 }
 
 export async function upsertTravelTime(travelTime: CommuteTravelTime): Promise<void> {
-  const { error } = await supabase.from('commute_travel_times').upsert({
-    cell_id: travelTime.cellId,
-    destination_id: travelTime.destinationId,
-    weekday: travelTime.weekday,
-    target_time: travelTime.targetTime,
-    duration_minutes: travelTime.durationMinutes,
-    transfers: travelTime.transfers,
-    legs: travelTime.legs,
+  await withRetry(async () => {
+    const { error } = await supabase.from('commute_travel_times').upsert({
+      cell_id: travelTime.cellId,
+      destination_id: travelTime.destinationId,
+      weekday: travelTime.weekday,
+      target_time: travelTime.targetTime,
+      duration_minutes: travelTime.durationMinutes,
+      transfers: travelTime.transfers,
+      legs: travelTime.legs,
+    });
+    if (error) throw error;
   });
-  if (error) throw error;
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -170,23 +190,27 @@ export async function updateCommuteJobProgress(
   id: string,
   completedCells: number,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('commute_jobs')
-    .update({ completed_cells: completedCells, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw error;
+  await withRetry(async () => {
+    const { error } = await supabase
+      .from('commute_jobs')
+      .update({ completed_cells: completedCells, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+  });
 }
 
 export async function finishCommuteJob(id: string, error: string | null): Promise<void> {
-  const { error: dbError } = await supabase
-    .from('commute_jobs')
-    .update({
-      status: error ? 'error' : 'done',
-      error,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
-  if (dbError) throw dbError;
+  await withRetry(async () => {
+    const { error: dbError } = await supabase
+      .from('commute_jobs')
+      .update({
+        status: error ? 'error' : 'done',
+        error,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+    if (dbError) throw dbError;
+  });
 }
 
 export async function fetchCommuteJob(id: string): Promise<CommuteJob | null> {
