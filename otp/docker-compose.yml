@@ -1,80 +1,34 @@
-# OpenTripPlanner sidecar for the commute heatmap feature.
-# Official usage reference: https://docs.opentripplanner.org/en/dev-2.x/Container-Image/
-#
-# Deploying this stack (e.g. as a Portainer stack) downloads the Berlin GTFS/OSM data and
-# builds the OTP graph automatically — no host shell access needed. Deliberately uses
-# "start, then retry until it works" instead of blocking depends_on/health conditions:
-# `docker compose up -d` must return in seconds for Portainer's deploy request to succeed,
-# but downloading ~1-2GB and building the graph takes many minutes. otp-build and otp will
-# fail and auto-restart a few times until their inputs exist — that's expected, not an error.
+# Commute heatmap recompute worker. Previously ran its own OpenTripPlanner instance
+# (Java, ~4GB heap) alongside it, but that competed for CPU/RAM with everything else on
+# the VPS and made the whole host unresponsive during a recompute. Trip lookups now go
+# through the public BVG API instead (src/lib/commute/bvg-planner.ts) — no local routing
+# engine to host. If you still have the old commute-otp/commute-otp-build/commute-otp-download
+# containers running from a previous deploy, stop and remove them; they're no longer used.
 services:
-  otp-download:
-    image: curlimages/curl:latest
-    container_name: commute-otp-download
-    user: "0:0"
-    volumes:
-      - ./graphs/berlin:/data
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        cd /data
-        [ -f osm.pbf ] || curl -fL "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf" -o osm.pbf.tmp && mv osm.pbf.tmp osm.pbf
-        [ -f vbb-gtfs.zip ] || curl -fL "https://vbb.de/vbbgtfs" -o vbb-gtfs.zip.tmp && mv vbb-gtfs.zip.tmp vbb-gtfs.zip
-    restart: on-failure:5
-
-  otp-build:
-    image: docker.io/opentripplanner/opentripplanner:latest
-    container_name: commute-otp-build
-    depends_on:
-      - otp-download
-    environment:
-      - JAVA_TOOL_OPTIONS=-Xmx4g
-    volumes:
-      - ./graphs/berlin:/var/opentripplanner
-    command: ["--build", "--save"]
-    # Fails fast if osm.pbf/vbb-gtfs.zip aren't downloaded yet — retries with backoff until
-    # otp-download finishes, then exits 0 and stops (no more restarts needed after success).
-    restart: on-failure:30
-
-  otp:
-    image: docker.io/opentripplanner/opentripplanner:latest
-    container_name: commute-otp
-    depends_on:
-      - otp-build
-    ports:
-      # Host port is configurable — change OTP_HOST_PORT if this default collides with
-      # something else already running on your host.
-      - "${OTP_HOST_PORT:-8095}:8080"
-    environment:
-      - JAVA_TOOL_OPTIONS=-Xmx4g
-    volumes:
-      - ./graphs/berlin:/var/opentripplanner
-    command: ["--load", "--serve"]
-    # Fails fast if graph.obj doesn't exist yet — keeps retrying until otp-build finishes.
-    restart: unless-stopped
-
   # Runs recompute jobs dispatched from the Vercel-hosted app (see
   # src/app/api/commute/recompute/route.ts). Needed because Vercel serverless functions
-  # can't run a multi-minute job; this container has no such limit and talks to OTP
-  # directly over the compose network (http://otp:8080), no public port needed for that.
+  # can't run a multi-hour job (pacing requests to the public BVG API makes a full grid
+  # recompute slow by design — see COMMUTE_API_MIN_INTERVAL_MS below); this container has
+  # no such time limit.
   commute-worker:
     build:
       context: ..
       dockerfile: otp/worker/Dockerfile
     container_name: commute-worker
     restart: unless-stopped
-    depends_on:
-      - otp
     ports:
       - "${COMMUTE_WORKER_PORT:-8096}:8091"
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
-      - OTP_BASE_URL=http://otp:8080
+      - BVG_API_BASE=${BVG_API_BASE:-https://v6.bvg.transport.rest}
       - COMMUTE_GRID_SPACING_METERS=${COMMUTE_GRID_SPACING_METERS:-500}
       - COMMUTE_WEBHOOK_SECRET=${COMMUTE_WEBHOOK_SECRET}
-      # How many OTP requests the worker fires at once. Keep at or below OTP's own HTTP
-      # handler thread pool size (roughly your host's CPU count) or searches start timing
-      # out from contention instead of running faster.
-      - COMMUTE_OTP_CONCURRENCY=${COMMUTE_OTP_CONCURRENCY:-3}
+      # How many trip lookups the worker keeps in flight at once, all waiting on the
+      # same rate gate below — this just bounds concurrency, it doesn't set the request rate.
+      - COMMUTE_OTP_CONCURRENCY=${COMMUTE_OTP_CONCURRENCY:-2}
+      # Minimum milliseconds between successive BVG API requests (shared across all
+      # in-flight workers). v6.bvg.transport.rest documents no official rate limit, so this
+      # is a conservative default (~2.5 req/s) rather than a known-safe number — raise it if
+      # you still see 429s in the worker logs, lower it cautiously if it stays clean.
+      - COMMUTE_API_MIN_INTERVAL_MS=${COMMUTE_API_MIN_INTERVAL_MS:-400}

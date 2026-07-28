@@ -1,10 +1,10 @@
 import { TransportModePreference } from '@/lib/types';
 import { loadBerlinBoundaryServer } from './boundary';
 import { generateBerlinGrid } from './grid';
-import { planTrip } from './otp';
+import { planTrip } from './bvg-planner';
 import * as db from './db';
 
-function toOtpTransportModes(prefs?: TransportModePreference): { mode: string }[] {
+function toPlannerTransportModes(prefs?: TransportModePreference): { mode: string }[] {
   if (!prefs) return [{ mode: 'WALK' }, { mode: 'TRANSIT' }];
   const modes: { mode: string }[] = [];
   if (prefs.walk) modes.push({ mode: 'WALK' });
@@ -13,10 +13,11 @@ function toOtpTransportModes(prefs?: TransportModePreference): { mode: string }[
   return modes.length > 0 ? modes : [{ mode: 'WALK' }, { mode: 'TRANSIT' }];
 }
 
-// OTP's own HTTP handler thread pool is sized to the host's CPU count (often small on a
-// VPS) — pushing more concurrent requests than that just causes contention and search
-// timeouts inside OTP, not faster throughput. Tune via COMMUTE_OTP_CONCURRENCY if needed.
-const CONCURRENCY = Number(process.env.COMMUTE_OTP_CONCURRENCY ?? '3');
+// Trip lookups go through the public BVG API (see bvg-planner.ts) rather than a
+// self-hosted OTP instance, which the VPS can't run alongside everything else on it.
+// bvg-planner.ts already paces requests to a shared rate via COMMUTE_API_MIN_INTERVAL_MS;
+// this just bounds how many requests can be in flight waiting on that gate at once.
+const CONCURRENCY = Number(process.env.COMMUTE_OTP_CONCURRENCY ?? '2');
 
 /** Runs a bounded number of tasks concurrently, waiting for all to settle. */
 async function runWithConcurrency<T>(
@@ -61,7 +62,7 @@ export async function runCommuteRecompute(
   jobId: string,
   transportModes?: TransportModePreference,
 ): Promise<void> {
-  const otpModes = toOtpTransportModes(transportModes);
+  const plannerModes = toPlannerTransportModes(transportModes);
 
   try {
     const spacing = Number(process.env.COMMUTE_GRID_SPACING_METERS ?? '500');
@@ -106,7 +107,7 @@ export async function runCommuteRecompute(
         date: nextDateForWeekday(task.weekday),
         time: task.time,
         arriveBy: task.timeMode === 'arrival',
-        transportModes: otpModes,
+        transportModes: plannerModes,
       });
 
       await db.upsertTravelTime({
