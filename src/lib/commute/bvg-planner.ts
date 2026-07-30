@@ -60,8 +60,13 @@ export async function planTrip(params: PlanTripParams): Promise<JourneyResult | 
   const query = new URLSearchParams({
     'from.latitude': String(params.fromLat),
     'from.longitude': String(params.fromLng),
+    // The API 500s on a bare lat/lng origin/destination ("invalid from.type: location") —
+    // it needs an address label alongside the coordinates, even a synthetic one, to accept
+    // it as a free-standing location rather than a resolvable stop/address lookup.
+    'from.address': 'Rasterzelle',
     'to.latitude': String(params.toLat),
     'to.longitude': String(params.toLng),
+    'to.address': 'Ziel',
     results: '1',
     polylines: 'false',
     remarks: 'false',
