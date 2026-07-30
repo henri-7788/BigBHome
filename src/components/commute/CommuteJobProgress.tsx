@@ -42,19 +42,50 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
   }
 
   useEffect(() => {
-    const storedJobId = localStorage.getItem(STORAGE_KEY);
-    if (!storedJobId) return;
+    const adopt = (job: CommuteJob) => {
+      setJob(job);
+      localStorage.setItem(STORAGE_KEY, job.id);
+      if (job.status === 'pending' || job.status === 'running') {
+        pollJob(job.id);
+      }
+    };
 
-    fetch(`/api/commute/jobs/${storedJobId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!data.success) return;
-        setJob(data.job);
-        if (data.job.status === 'pending' || data.job.status === 'running') {
-          pollJob(storedJobId);
-        }
-      })
-      .catch(() => {});
+    const storedJobId = localStorage.getItem(STORAGE_KEY);
+    const storedJobFetch = storedJobId
+      ? fetch(`/api/commute/jobs/${storedJobId}`)
+          .then((res) => res.json())
+          .then((data) => (data.success ? (data.job as CommuteJob) : null))
+          .catch(() => null)
+      : Promise.resolve(null);
+
+    // Falls back to whatever job actually ran most recently — the stored id only tracks a
+    // job *this browser* started, so a run triggered elsewhere (server cron, another
+    // device, a direct API call) would otherwise never show up here at all.
+    storedJobFetch.then((storedJob) => {
+      if (storedJob && (storedJob.status === 'pending' || storedJob.status === 'running')) {
+        adopt(storedJob);
+        return;
+      }
+
+      fetch('/api/commute/jobs/latest')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!data.success || !data.job) {
+            if (storedJob) setJob(storedJob);
+            return;
+          }
+          if (data.job.status === 'pending' || data.job.status === 'running') {
+            adopt(data.job);
+          } else if (storedJob) {
+            setJob(storedJob);
+          } else {
+            setJob(data.job);
+          }
+        })
+        .catch(() => {
+          if (storedJob) setJob(storedJob);
+        });
+    });
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
