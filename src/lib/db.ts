@@ -1,51 +1,69 @@
-import { supabase } from './supabase';
+import { Query } from 'appwrite';
+import { databases, DATABASE_ID } from './appwrite';
 import { Destination, DestinationJourney, ListingResult, ScrapedListing } from './types';
+
+const LISTINGS = 'wg_listings';
+const DESTINATIONS = 'wg_destinations';
+const PAGE_SIZE = 100;
 
 // ─── DB row shapes ────────────────────────────────────────────────────────────
 
 interface ListingRow {
-  id: string;
+  $id: string;
   url: string;
-  listing_data: ScrapedListing;
-  destination_journeys: DestinationJourney[];
+  listing_data: string;
+  destination_journeys: string;
   is_favorite: boolean;
-  created_at: string;
 }
 
 interface DestinationRow {
-  id: string;
+  $id: string;
   name: string;
   address: string;
   lat: number;
   lng: number;
-  created_at: string;
 }
 
 // ─── Conversion ──────────────────────────────────────────────────────────────
 
 function rowToListingResult(row: ListingRow): ListingResult {
+  const listing_data: ScrapedListing = JSON.parse(row.listing_data);
   return {
-    id: row.id,
-    listing: row.listing_data,
-    destinationJourneys: row.destination_journeys ?? [],
+    id: row.$id,
+    listing: listing_data,
+    destinationJourneys: (JSON.parse(row.destination_journeys) as DestinationJourney[]) ?? [],
     isFavorite: row.is_favorite,
     isSelectedForComparison: false,
     isLoading: false,
     error: null,
-    isOffline: row.listing_data?.isOffline ?? false,
+    isOffline: listing_data?.isOffline ?? false,
   };
+}
+
+async function listAll<T extends { $id: string }>(
+  collection: string,
+  queries: string[],
+): Promise<T[]> {
+  const results: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await databases.listDocuments<T & { $id: string }>(DATABASE_ID, collection, [
+      ...queries,
+      Query.limit(PAGE_SIZE),
+      ...(cursor ? [Query.cursorAfter(cursor)] : []),
+    ]);
+    results.push(...page.documents);
+    if (page.documents.length < PAGE_SIZE) break;
+    cursor = page.documents[page.documents.length - 1].$id;
+  }
+  return results;
 }
 
 // ─── Listings ─────────────────────────────────────────────────────────────────
 
 export async function fetchListings(): Promise<ListingResult[]> {
-  const { data, error } = await supabase
-    .from('wg_listings')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) throw error;
-  return (data as ListingRow[]).map(rowToListingResult);
+  const rows = await listAll<ListingRow>(LISTINGS, [Query.orderDesc('$createdAt')]);
+  return rows.map(rowToListingResult);
 }
 
 export async function upsertListing(
@@ -54,83 +72,59 @@ export async function upsertListing(
   destinationJourneys: DestinationJourney[],
   isFavorite: boolean,
 ): Promise<void> {
-  const { error } = await supabase.from('wg_listings').upsert({
-    id,
+  await databases.upsertDocument(DATABASE_ID, LISTINGS, id, {
     url: listing.url,
-    listing_data: listing,
-    destination_journeys: destinationJourneys,
+    listing_data: JSON.stringify(listing),
+    destination_journeys: JSON.stringify(destinationJourneys),
     is_favorite: isFavorite,
   });
-  if (error) throw error;
 }
 
 export async function updateOfflineStatus(id: string, isOffline: boolean): Promise<void> {
-  const { data, error: fetchError } = await supabase
-    .from('wg_listings')
-    .select('listing_data')
-    .eq('id', id)
-    .single();
-  if (fetchError || !data) return;
-  const { error } = await supabase
-    .from('wg_listings')
-    .update({ listing_data: { ...(data as ListingRow).listing_data, isOffline } })
-    .eq('id', id);
-  if (error) throw error;
+  let row: ListingRow;
+  try {
+    row = await databases.getDocument<ListingRow & { $id: string }>(DATABASE_ID, LISTINGS, id);
+  } catch {
+    return;
+  }
+  const listing_data = { ...JSON.parse(row.listing_data), isOffline };
+  await databases.updateDocument(DATABASE_ID, LISTINGS, id, {
+    listing_data: JSON.stringify(listing_data),
+  });
 }
 
 export async function updateFavorite(id: string, isFavorite: boolean): Promise<void> {
-  const { error } = await supabase
-    .from('wg_listings')
-    .update({ is_favorite: isFavorite })
-    .eq('id', id);
-  if (error) throw error;
+  await databases.updateDocument(DATABASE_ID, LISTINGS, id, { is_favorite: isFavorite });
 }
 
 export async function deleteListing(id: string): Promise<void> {
-  const { error } = await supabase.from('wg_listings').delete().eq('id', id);
-  if (error) throw error;
+  await databases.deleteDocument(DATABASE_ID, LISTINGS, id);
 }
 
 export async function listingUrlExists(url: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('wg_listings')
-    .select('id')
-    .eq('url', url)
-    .maybeSingle();
-  return data !== null;
+  const page = await databases.listDocuments(DATABASE_ID, LISTINGS, [
+    Query.equal('url', url),
+    Query.limit(1),
+  ]);
+  return page.documents.length > 0;
 }
 
 // ─── Destinations ─────────────────────────────────────────────────────────────
 
 export async function fetchDestinations(): Promise<Destination[]> {
-  const { data, error } = await supabase
-    .from('wg_destinations')
-    .select('*')
-    .order('created_at', { ascending: true });
-
-  if (error) throw error;
-  return (data as DestinationRow[]).map(({ id, name, address, lat, lng }) => ({
-    id,
-    name,
-    address,
-    lat,
-    lng,
-  }));
+  const rows = await listAll<DestinationRow>(DESTINATIONS, [Query.orderAsc('$createdAt')]);
+  return rows.map(({ $id, name, address, lat, lng }) => ({ id: $id, name, address, lat, lng }));
 }
 
 export async function insertDestination(dest: Destination): Promise<void> {
-  const { error } = await supabase.from('wg_destinations').insert({
-    id: dest.id,
+  await databases.createDocument(DATABASE_ID, DESTINATIONS, dest.id, {
     name: dest.name,
     address: dest.address,
     lat: dest.lat,
     lng: dest.lng,
   });
-  if (error) throw error;
 }
 
 export async function deleteDestination(id: string): Promise<void> {
-  const { error } = await supabase.from('wg_destinations').delete().eq('id', id);
-  if (error) throw error;
+  await databases.deleteDocument(DATABASE_ID, DESTINATIONS, id);
 }
-

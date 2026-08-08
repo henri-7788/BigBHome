@@ -1,4 +1,5 @@
-import { supabase } from '@/lib/supabase';
+import { Query } from 'appwrite';
+import { databases, DATABASE_ID } from '@/lib/appwrite';
 import {
   CommuteDestination,
   CommuteJob,
@@ -6,7 +7,12 @@ import {
   JourneyLeg,
 } from '@/lib/types';
 
-// The recompute job can run for hours across thousands of Supabase calls. Without a retry,
+const DESTINATIONS = 'commute_destinations';
+const TRAVEL_TIMES = 'commute_travel_times';
+const JOBS = 'commute_jobs';
+const PAGE_SIZE = 100;
+
+// The recompute job can run for hours across thousands of Appwrite calls. Without a retry,
 // a single transient blip (e.g. a momentary DNS failure) throws and kills the whole job,
 // discarding all progress made so far — so retry a few times with backoff before giving up.
 async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
@@ -22,17 +28,52 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   throw lastErr;
 }
 
+async function listAll<T extends { $id: string }>(
+  collection: string,
+  queries: string[],
+): Promise<T[]> {
+  const results: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await databases.listDocuments<T & { $id: string }>(DATABASE_ID, collection, [
+      ...queries,
+      Query.limit(PAGE_SIZE),
+      ...(cursor ? [Query.cursorAfter(cursor)] : []),
+    ]);
+    results.push(...page.documents);
+    if (page.documents.length < PAGE_SIZE) break;
+    cursor = page.documents[page.documents.length - 1].$id;
+  }
+  return results;
+}
+
+/** commute_travel_times has no natural single-column key — derive a stable 32-char
+ * document id from the composite (cell, destination, weekday, time) key so re-running
+ * a recompute upserts the same row instead of piling up duplicates. Uses the isomorphic
+ * Web Crypto API (not node:crypto) since this module is also bundled into client code. */
+export async function travelTimeDocId(
+  cellId: string,
+  destinationId: string,
+  weekday: number,
+  targetTime: string,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(`${cellId}_${destinationId}_${weekday}_${targetTime}`);
+  const digest = await crypto.subtle.digest('SHA-1', bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+}
+
 // ─── DB row shapes ────────────────────────────────────────────────────────────
 
 interface CommuteDestinationRow {
-  id: string;
+  $id: string;
   name: string;
   address: string;
   lat: number;
   lng: number;
   weight: number;
-  schedule: CommuteDestination['schedule'];
-  created_at: string;
+  schedule: string;
 }
 
 interface CommuteTravelTimeRow {
@@ -42,28 +83,28 @@ interface CommuteTravelTimeRow {
   target_time: string;
   duration_minutes: number | null;
   transfers: number | null;
-  legs: JourneyLeg[] | null;
+  legs: string | null;
 }
 
 interface CommuteJobRow {
-  id: string;
+  $id: string;
   status: CommuteJob['status'];
   total_cells: number;
   completed_cells: number;
   error: string | null;
-  created_at: string;
-  updated_at: string;
+  $createdAt: string;
+  $updatedAt: string;
 }
 
 function rowToDestination(row: CommuteDestinationRow): CommuteDestination {
   return {
-    id: row.id,
+    id: row.$id,
     name: row.name,
     address: row.address,
     lat: row.lat,
     lng: row.lng,
     weight: row.weight,
-    schedule: row.schedule ?? [],
+    schedule: row.schedule ? JSON.parse(row.schedule) : [],
   };
 }
 
@@ -75,19 +116,19 @@ function rowToTravelTime(row: CommuteTravelTimeRow): CommuteTravelTime {
     targetTime: row.target_time,
     durationMinutes: row.duration_minutes,
     transfers: row.transfers,
-    legs: row.legs,
+    legs: row.legs ? (JSON.parse(row.legs) as JourneyLeg[]) : null,
   };
 }
 
 function rowToJob(row: CommuteJobRow): CommuteJob {
   return {
-    id: row.id,
+    id: row.$id,
     status: row.status,
     totalCells: row.total_cells,
     completedCells: row.completed_cells,
     error: row.error,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: row.$createdAt,
+    updatedAt: row.$updatedAt,
   };
 }
 
@@ -95,95 +136,82 @@ function rowToJob(row: CommuteJobRow): CommuteJob {
 
 export async function fetchCommuteDestinations(): Promise<CommuteDestination[]> {
   return withRetry(async () => {
-    const { data, error } = await supabase
-      .from('commute_destinations')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
-    return (data as CommuteDestinationRow[]).map(rowToDestination);
+    const rows = await listAll<CommuteDestinationRow>(DESTINATIONS, [Query.orderAsc('$createdAt')]);
+    return rows.map(rowToDestination);
   });
 }
 
 export async function insertCommuteDestination(dest: CommuteDestination): Promise<void> {
-  const { error } = await supabase.from('commute_destinations').insert({
-    id: dest.id,
+  await databases.createDocument(DATABASE_ID, DESTINATIONS, dest.id, {
     name: dest.name,
     address: dest.address,
     lat: dest.lat,
     lng: dest.lng,
     weight: dest.weight,
-    schedule: dest.schedule,
+    schedule: JSON.stringify(dest.schedule),
   });
-  if (error) throw error;
 }
 
 export async function updateCommuteDestination(dest: CommuteDestination): Promise<void> {
-  const { error } = await supabase
-    .from('commute_destinations')
-    .update({
-      name: dest.name,
-      address: dest.address,
-      lat: dest.lat,
-      lng: dest.lng,
-      weight: dest.weight,
-      schedule: dest.schedule,
-    })
-    .eq('id', dest.id);
-  if (error) throw error;
+  await databases.updateDocument(DATABASE_ID, DESTINATIONS, dest.id, {
+    name: dest.name,
+    address: dest.address,
+    lat: dest.lat,
+    lng: dest.lng,
+    weight: dest.weight,
+    schedule: JSON.stringify(dest.schedule),
+  });
 }
 
 export async function deleteCommuteDestination(id: string): Promise<void> {
-  const { error } = await supabase.from('commute_destinations').delete().eq('id', id);
-  if (error) throw error;
+  await databases.deleteDocument(DATABASE_ID, DESTINATIONS, id);
 }
 
 // ─── Travel times ──────────────────────────────────────────────────────────────
 
 export async function fetchTravelTimes(destinationIds: string[]): Promise<CommuteTravelTime[]> {
   if (destinationIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from('commute_travel_times')
-    .select('*')
-    .in('destination_id', destinationIds);
-
-  if (error) throw error;
-  return (data as CommuteTravelTimeRow[]).map(rowToTravelTime);
+  const rows = await listAll<CommuteTravelTimeRow & { $id: string }>(TRAVEL_TIMES, [
+    Query.equal('destination_id', destinationIds),
+  ]);
+  return rows.map(rowToTravelTime);
 }
 
 export async function upsertTravelTime(travelTime: CommuteTravelTime): Promise<void> {
   await withRetry(async () => {
-    const { error } = await supabase.from('commute_travel_times').upsert({
+    const id = await travelTimeDocId(
+      travelTime.cellId,
+      travelTime.destinationId,
+      travelTime.weekday,
+      travelTime.targetTime,
+    );
+    await databases.upsertDocument(DATABASE_ID, TRAVEL_TIMES, id, {
       cell_id: travelTime.cellId,
       destination_id: travelTime.destinationId,
       weekday: travelTime.weekday,
       target_time: travelTime.targetTime,
       duration_minutes: travelTime.durationMinutes,
       transfers: travelTime.transfers,
-      legs: travelTime.legs,
+      legs: travelTime.legs ? JSON.stringify(travelTime.legs) : null,
     });
-    if (error) throw error;
   });
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export async function initCommuteJob(id: string): Promise<void> {
-  const { error } = await supabase.from('commute_jobs').insert({
-    id,
+  await databases.createDocument(DATABASE_ID, JOBS, id, {
     status: 'pending',
     total_cells: 0,
     completed_cells: 0,
   });
-  if (error) throw error;
 }
 
 export async function setCommuteJobTotal(id: string, totalCells: number): Promise<void> {
-  const { error } = await supabase
-    .from('commute_jobs')
-    .update({ status: 'running', total_cells: totalCells, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw error;
+  await databases.updateDocument(DATABASE_ID, JOBS, id, {
+    status: 'running',
+    total_cells: totalCells,
+  });
 }
 
 export async function updateCommuteJobProgress(
@@ -191,45 +219,32 @@ export async function updateCommuteJobProgress(
   completedCells: number,
 ): Promise<void> {
   await withRetry(async () => {
-    const { error } = await supabase
-      .from('commute_jobs')
-      .update({ completed_cells: completedCells, updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) throw error;
+    await databases.updateDocument(DATABASE_ID, JOBS, id, { completed_cells: completedCells });
   });
 }
 
 export async function finishCommuteJob(id: string, error: string | null): Promise<void> {
   await withRetry(async () => {
-    const { error: dbError } = await supabase
-      .from('commute_jobs')
-      .update({
-        status: error ? 'error' : 'done',
-        error,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id);
-    if (dbError) throw dbError;
+    await databases.updateDocument(DATABASE_ID, JOBS, id, {
+      status: error ? 'error' : 'done',
+      error,
+    });
   });
 }
 
 export async function fetchCommuteJob(id: string): Promise<CommuteJob | null> {
-  const { data, error } = await supabase
-    .from('commute_jobs')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle();
-  if (error) throw error;
-  return data ? rowToJob(data as CommuteJobRow) : null;
+  try {
+    const row = await databases.getDocument<CommuteJobRow & { $id: string }>(DATABASE_ID, JOBS, id);
+    return rowToJob(row);
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchLatestCommuteJob(): Promise<CommuteJob | null> {
-  const { data, error } = await supabase
-    .from('commute_jobs')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data ? rowToJob(data as CommuteJobRow) : null;
+  const page = await databases.listDocuments<CommuteJobRow & { $id: string }>(DATABASE_ID, JOBS, [
+    Query.orderDesc('$createdAt'),
+    Query.limit(1),
+  ]);
+  return page.documents.length > 0 ? rowToJob(page.documents[0]) : null;
 }
