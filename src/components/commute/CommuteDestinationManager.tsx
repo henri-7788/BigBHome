@@ -13,6 +13,7 @@ interface Props {
   destinations: CommuteDestination[];
   onAdd: (dest: Omit<CommuteDestination, 'id'>) => void;
   onUpdate: (dest: CommuteDestination) => void;
+  onWeightChange: (id: string, weight: number) => void;
   onRemove: (id: string) => void;
 }
 
@@ -93,7 +94,13 @@ function ScheduleEditor({
   );
 }
 
-export function CommuteDestinationManager({ destinations, onAdd, onUpdate, onRemove }: Props) {
+export function CommuteDestinationManager({
+  destinations,
+  onAdd,
+  onUpdate,
+  onWeightChange,
+  onRemove,
+}: Props) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -206,7 +213,7 @@ export function CommuteDestinationManager({ destinations, onAdd, onUpdate, onRem
                   min={1}
                   max={100}
                   value={dest.weight}
-                  onChange={(e) => onUpdate({ ...dest, weight: Number(e.target.value) })}
+                  onChange={(e) => onWeightChange(dest.id, Number(e.target.value))}
                   className="flex-1 accent-blue-600"
                 />
                 <span className="text-xs text-gray-500 w-8 text-right">{dest.weight}</span>

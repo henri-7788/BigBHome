@@ -12,7 +12,7 @@ import { CommuteDetailPanel } from './CommuteDetailPanel';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 export function CommuteView() {
-  const { destinations, loaded, addDestination, updateDestination, removeDestination } =
+  const { destinations, loaded, addDestination, updateDestination, updateWeight, removeDestination } =
     useCommuteDestinations();
   const { settings, updateSettings } = useCommuteSettings();
   const { cellScores, loading, reloadTravelTimes } = useCommuteGrid(destinations, settings.maxMinutes);
@@ -38,6 +38,7 @@ export function CommuteView() {
           destinations={destinations}
           onAdd={addDestination}
           onUpdate={updateDestination}
+          onWeightChange={updateWeight}
           onRemove={removeDestination}
         />
         <CommuteSettingsPanel settings={settings} onChange={updateSettings} />

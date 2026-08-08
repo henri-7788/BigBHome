@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { CommuteDestination } from '@/lib/types';
 import * as db from '@/lib/commute/db';
+import { redistributeWeights } from '@/lib/commute/weights';
 
 export function useCommuteDestinations() {
   const [destinations, setDestinations] = useState<CommuteDestination[]>([]);
@@ -37,5 +38,20 @@ export function useCommuteDestinations() {
     );
   };
 
-  return { destinations, loaded, addDestination, updateDestination, removeDestination };
+  const updateWeight = (id: string, weight: number) => {
+    setDestinations((prev) => {
+      const next = redistributeWeights(prev, id, weight);
+      for (const dest of next) {
+        const before = prev.find((d) => d.id === dest.id);
+        if (before && before.weight !== dest.weight) {
+          db.updateCommuteDestination(dest).catch((err) =>
+            console.error('DB update commute destination error:', err),
+          );
+        }
+      }
+      return next;
+    });
+  };
+
+  return { destinations, loaded, addDestination, updateDestination, updateWeight, removeDestination };
 }
