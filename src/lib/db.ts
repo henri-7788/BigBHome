@@ -47,14 +47,15 @@ async function listAll<T extends { $id: string }>(
   const results: T[] = [];
   let cursor: string | undefined;
   for (;;) {
-    const page = await databases.listDocuments<T & { $id: string }>(DATABASE_ID, collection, [
+    const page = await databases.listDocuments(DATABASE_ID, collection, [
       ...queries,
       Query.limit(PAGE_SIZE),
       ...(cursor ? [Query.cursorAfter(cursor)] : []),
     ]);
-    results.push(...page.documents);
-    if (page.documents.length < PAGE_SIZE) break;
-    cursor = page.documents[page.documents.length - 1].$id;
+    const rows = page.documents as unknown as T[];
+    results.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+    cursor = rows[rows.length - 1].$id;
   }
   return results;
 }
@@ -83,7 +84,7 @@ export async function upsertListing(
 export async function updateOfflineStatus(id: string, isOffline: boolean): Promise<void> {
   let row: ListingRow;
   try {
-    row = await databases.getDocument<ListingRow & { $id: string }>(DATABASE_ID, LISTINGS, id);
+    row = (await databases.getDocument(DATABASE_ID, LISTINGS, id)) as unknown as ListingRow;
   } catch {
     return;
   }

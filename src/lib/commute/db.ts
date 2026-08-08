@@ -35,14 +35,15 @@ async function listAll<T extends { $id: string }>(
   const results: T[] = [];
   let cursor: string | undefined;
   for (;;) {
-    const page = await databases.listDocuments<T & { $id: string }>(DATABASE_ID, collection, [
+    const page = await databases.listDocuments(DATABASE_ID, collection, [
       ...queries,
       Query.limit(PAGE_SIZE),
       ...(cursor ? [Query.cursorAfter(cursor)] : []),
     ]);
-    results.push(...page.documents);
-    if (page.documents.length < PAGE_SIZE) break;
-    cursor = page.documents[page.documents.length - 1].$id;
+    const rows = page.documents as unknown as T[];
+    results.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+    cursor = rows[rows.length - 1].$id;
   }
   return results;
 }
@@ -234,17 +235,17 @@ export async function finishCommuteJob(id: string, error: string | null): Promis
 
 export async function fetchCommuteJob(id: string): Promise<CommuteJob | null> {
   try {
-    const row = await databases.getDocument<CommuteJobRow & { $id: string }>(DATABASE_ID, JOBS, id);
-    return rowToJob(row);
+    const row = await databases.getDocument(DATABASE_ID, JOBS, id);
+    return rowToJob(row as unknown as CommuteJobRow);
   } catch {
     return null;
   }
 }
 
 export async function fetchLatestCommuteJob(): Promise<CommuteJob | null> {
-  const page = await databases.listDocuments<CommuteJobRow & { $id: string }>(DATABASE_ID, JOBS, [
+  const page = await databases.listDocuments(DATABASE_ID, JOBS, [
     Query.orderDesc('$createdAt'),
     Query.limit(1),
   ]);
-  return page.documents.length > 0 ? rowToJob(page.documents[0]) : null;
+  return page.documents.length > 0 ? rowToJob(page.documents[0] as unknown as CommuteJobRow) : null;
 }
