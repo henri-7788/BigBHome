@@ -102,6 +102,7 @@ export function CommuteDestinationManager({
   onRemove,
 }: Props) {
   const [showForm, setShowForm] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -169,7 +170,20 @@ export function CommuteDestinationManager({
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-700">🎯 Ziele</h2>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-1.5 text-sm font-semibold text-gray-700"
+        >
+          <span
+            className={`inline-block transition-transform text-xs text-gray-400 ${collapsed ? '-rotate-90' : ''}`}
+          >
+            ▼
+          </span>
+          🎯 Ziele
+          {destinations.length > 0 && (
+            <span className="text-xs font-normal text-gray-400">({destinations.length})</span>
+          )}
+        </button>
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
@@ -186,7 +200,7 @@ export function CommuteDestinationManager({
         </p>
       )}
 
-      {destinations.length > 0 && (
+      {destinations.length > 0 && !collapsed && (
         <div className="space-y-3 mb-3">
           {destinations.map((dest) => (
             <div key={dest.id} className="rounded-lg border border-gray-100 p-3 space-y-2">

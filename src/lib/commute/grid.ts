@@ -64,3 +64,20 @@ export function generateBerlinGrid(spacingMeters: number, boundary: BoundaryGeoJ
 
   return cells;
 }
+
+/**
+ * Orders cells outward from a center point (nearest first) so a recompute fills in the
+ * heatmap starting from the middle and spiraling out, instead of row by row. Sorting by
+ * distance alone already produces the "snail" effect visually — each pass of the job works
+ * through an expanding ring of cells around the center.
+ */
+export function spiralOrderCells(
+  cells: GridCell[],
+  center: { lat: number; lng: number },
+): GridCell[] {
+  return [...cells].sort((a, b) => {
+    const distA = Math.hypot(a.lat - center.lat, a.lng - center.lng);
+    const distB = Math.hypot(b.lat - center.lat, b.lng - center.lng);
+    return distA - distB;
+  });
+}

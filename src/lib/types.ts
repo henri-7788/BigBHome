@@ -130,7 +130,7 @@ export interface CommuteTravelTime {
 
 export interface CommuteJob {
   id: string;
-  status: 'pending' | 'running' | 'done' | 'error';
+  status: 'pending' | 'running' | 'stopped' | 'done' | 'error';
   totalCells: number;
   completedCells: number;
   error: string | null;

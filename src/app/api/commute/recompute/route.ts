@@ -11,22 +11,31 @@ export const maxDuration = 300;
 const WORKER_URL = process.env.COMMUTE_WORKER_URL;
 
 export async function POST(req: NextRequest) {
-  const jobId = crypto.randomUUID();
   let transportModes: TransportModePreference | undefined;
+  let resume = false;
+  let resumeJobId: string | undefined;
   try {
     const body = await req.json();
     transportModes = body?.transportModes;
+    resume = body?.resume === true;
+    resumeJobId = body?.jobId;
   } catch {
     // no body provided — fall back to defaults
   }
 
-  try {
-    await initCommuteJob(jobId);
-  } catch (err) {
-    return NextResponse.json(
-      { success: false, error: err instanceof Error ? err.message : 'Job konnte nicht angelegt werden' },
-      { status: 500 },
-    );
+  // Resuming a stopped job reuses its id (and its already-reported progress) instead of
+  // starting a fresh one — a brand-new job would reset the progress bar to 0%.
+  const jobId = resume && resumeJobId ? resumeJobId : crypto.randomUUID();
+
+  if (!resume || !resumeJobId) {
+    try {
+      await initCommuteJob(jobId);
+    } catch (err) {
+      return NextResponse.json(
+        { success: false, error: err instanceof Error ? err.message : 'Job konnte nicht angelegt werden' },
+        { status: 500 },
+      );
+    }
   }
 
   if (WORKER_URL) {
@@ -39,7 +48,7 @@ export async function POST(req: NextRequest) {
             ? { Authorization: `Bearer ${process.env.COMMUTE_WEBHOOK_SECRET}` }
             : {}),
         },
-        body: JSON.stringify({ jobId, transportModes }),
+        body: JSON.stringify({ jobId, transportModes, resume }),
       });
       if (!res.ok) {
         await finishCommuteJob(jobId, `Worker antwortete mit ${res.status}`);
@@ -51,7 +60,7 @@ export async function POST(req: NextRequest) {
     }
   } else {
     // Local dev fallback: no separate worker configured, run in-process past the response.
-    after(() => runCommuteRecompute(jobId, transportModes));
+    after(() => runCommuteRecompute(jobId, transportModes, { resume }));
   }
 
   return NextResponse.json({ success: true, jobId });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { CommuteCellScore, CommuteDestination } from '@/lib/types';
@@ -54,8 +54,11 @@ const OUTLINE_LAYER_ID = 'commute-grid-selected-outline';
 export function CommuteHeatmapMap({ cellScores, destinations, onCellClick, selectedCellId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const loadedRef = useRef(false);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  // State (not a ref) so effects that only need to run once the map has finished loading
+  // re-run when this flips — a ref wouldn't retrigger effects whose data (e.g. destinations)
+  // was already set before the map's "load" event fired, leaving markers/data never drawn.
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -119,33 +122,33 @@ export function CommuteHeatmapMap({ cellScores, destinations, onCellClick, selec
         map.getCanvas().style.cursor = '';
       });
 
-      loadedRef.current = true;
+      setMapLoaded(true);
     });
 
     return () => {
       map.remove();
       mapRef.current = null;
-      loadedRef.current = false;
+      setMapLoaded(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
+    if (!map || !mapLoaded) return;
     const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     source?.setData(cellsToGeoJSON(cellScores));
-  }, [cellScores]);
+  }, [cellScores, mapLoaded]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
+    if (!map || !mapLoaded) return;
     map.setFilter(OUTLINE_LAYER_ID, ['==', ['get', 'cellId'], selectedCellId ?? '']);
-  }, [selectedCellId]);
+  }, [selectedCellId, mapLoaded]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
+    if (!map || !mapLoaded) return;
 
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = destinations.map((dest) => {
@@ -161,7 +164,7 @@ export function CommuteHeatmapMap({ cellScores, destinations, onCellClick, selec
         .setPopup(new maplibregl.Popup({ offset: 20 }).setText(dest.name))
         .addTo(map);
     });
-  }, [destinations]);
+  }, [destinations, mapLoaded]);
 
   return <div ref={containerRef} className="h-full w-full rounded-xl" />;
 }

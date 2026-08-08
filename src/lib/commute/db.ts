@@ -224,6 +224,10 @@ export async function updateCommuteJobProgress(
   });
 }
 
+export async function stopCommuteJob(id: string): Promise<void> {
+  await databases.updateDocument(DATABASE_ID, JOBS, id, { status: 'stopped' });
+}
+
 export async function finishCommuteJob(id: string, error: string | null): Promise<void> {
   await withRetry(async () => {
     await databases.updateDocument(DATABASE_ID, JOBS, id, {

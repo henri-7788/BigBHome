@@ -29,10 +29,12 @@ const server = createServer(async (req, res) => {
 
   let jobId: string | undefined;
   let transportModes: TransportModePreference | undefined;
+  let resume = false;
   try {
     const body = JSON.parse((await readBody(req)) || '{}');
     jobId = body.jobId;
     transportModes = body.transportModes;
+    resume = body.resume === true;
   } catch {
     res.writeHead(400).end('Invalid JSON body');
     return;
@@ -47,7 +49,7 @@ const server = createServer(async (req, res) => {
   // with progress tracked in Supabase (commute_jobs) for the Vercel-hosted UI to poll.
   res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ accepted: true }));
 
-  runCommuteRecompute(jobId, transportModes).catch((err) => {
+  runCommuteRecompute(jobId, transportModes, { resume }).catch((err) => {
     console.error(`Recompute job ${jobId} failed:`, err);
     finishCommuteJob(jobId!, err instanceof Error ? err.message : 'Unbekannter Fehler').catch(() => {});
   });

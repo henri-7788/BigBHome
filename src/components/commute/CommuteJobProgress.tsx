@@ -93,14 +93,18 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleRecompute() {
+  async function handleRecompute(options?: { resume?: boolean }) {
     setError(null);
-    setJob(null);
+    if (!options?.resume) setJob(null);
     try {
       const res = await fetch('/api/commute/recompute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transportModes }),
+        body: JSON.stringify({
+          transportModes,
+          resume: options?.resume ?? false,
+          jobId: options?.resume ? job?.id : undefined,
+        }),
       });
       const data = await res.json();
       if (!data.success) {
@@ -114,21 +118,57 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
     }
   }
 
-  const running = job && job.status !== 'done' && job.status !== 'error';
+  async function handleStop() {
+    if (!job) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/commute/jobs/${job.id}/stop`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) {
+        setError(data.error ?? 'Job konnte nicht gestoppt werden');
+        return;
+      }
+      if (pollRef.current) clearInterval(pollRef.current);
+      setJob((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
+    } catch {
+      setError('Netzwerkfehler');
+    }
+  }
+
+  const running = job && (job.status === 'pending' || job.status === 'running');
+  const stopped = job?.status === 'stopped';
   const progressPct = job && job.totalCells > 0 ? Math.round((job.completedCells / job.totalCells) * 100) : 0;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700">🔄 Berechnung</h2>
-        <button
-          onClick={handleRecompute}
-          disabled={disabled || !!running}
-          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {running && <LoadingSpinner size="sm" />}
-          Neu berechnen
-        </button>
+        <div className="flex items-center gap-1.5">
+          {running && (
+            <button
+              onClick={handleStop}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+            >
+              Stoppen
+            </button>
+          )}
+          {stopped && (
+            <button
+              onClick={() => handleRecompute({ resume: true })}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+            >
+              Fortsetzen
+            </button>
+          )}
+          <button
+            onClick={() => handleRecompute()}
+            disabled={disabled || !!running}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {running && <LoadingSpinner size="sm" />}
+            Neu berechnen
+          </button>
+        </div>
       </div>
 
       {disabled && !job && (
@@ -139,13 +179,16 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
         <div className="space-y-1.5">
           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
             <div
-              className={`h-full transition-all ${job.status === 'error' ? 'bg-red-500' : 'bg-blue-600'}`}
+              className={`h-full transition-all ${
+                job.status === 'error' ? 'bg-red-500' : stopped ? 'bg-amber-500' : 'bg-blue-600'
+              }`}
               style={{ width: `${job.status === 'done' ? 100 : progressPct}%` }}
             />
           </div>
           <p className="text-xs text-gray-500">
             {job.status === 'done' && 'Fertig ✓'}
             {job.status === 'error' && `Fehler: ${job.error}`}
+            {stopped && `Angehalten bei ${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)`}
             {running && `${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)`}
           </p>
         </div>
