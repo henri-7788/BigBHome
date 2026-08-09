@@ -28,14 +28,40 @@ function mapMode(leg: BvgLeg): JourneyLeg['mode'] {
 // than find the limit by getting throttled mid-job. A single shared gate (rather than a
 // per-worker delay) keeps the total request rate bounded no matter how many concurrent
 // workers call planTrip — see COMMUTE_OTP_CONCURRENCY in recompute.ts.
-const MIN_REQUEST_INTERVAL_MS = Number(process.env.COMMUTE_API_MIN_INTERVAL_MS ?? '400');
+//
+// The gate is adaptive rather than fixed: every 429 slows it down (so a job never keeps
+// hammering a limit it's already hit), and a long clean streak cautiously speeds it back up
+// toward the configured base rate. This lets a multi-hour job find a safe pace on its own
+// instead of needing the base interval hand-tuned per run.
+const BASE_INTERVAL_MS = Number(process.env.COMMUTE_API_MIN_INTERVAL_MS ?? '600');
+const MAX_INTERVAL_MS = 10_000;
+const BACKOFF_FACTOR = 1.5;
+const RECOVERY_FACTOR = 0.9;
+const RECOVERY_STREAK = 50;
+
+let currentIntervalMs = BASE_INTERVAL_MS;
+let consecutiveSuccesses = 0;
 let nextSlot = 0;
 
 async function waitForSlot(): Promise<void> {
   const now = Date.now();
   const slot = Math.max(now, nextSlot);
-  nextSlot = slot + MIN_REQUEST_INTERVAL_MS;
+  nextSlot = slot + currentIntervalMs;
   if (slot > now) await new Promise((r) => setTimeout(r, slot - now));
+}
+
+function recordRateLimited(): void {
+  currentIntervalMs = Math.min(MAX_INTERVAL_MS, Math.round(currentIntervalMs * BACKOFF_FACTOR));
+  consecutiveSuccesses = 0;
+}
+
+function recordSuccess(): void {
+  if (currentIntervalMs <= BASE_INTERVAL_MS) return;
+  consecutiveSuccesses++;
+  if (consecutiveSuccesses >= RECOVERY_STREAK) {
+    currentIntervalMs = Math.max(BASE_INTERVAL_MS, Math.round(currentIntervalMs * RECOVERY_FACTOR));
+    consecutiveSuccesses = 0;
+  }
 }
 
 function parseRetryAfterMs(res: Response): number | null {
@@ -90,6 +116,7 @@ export async function planTrip(params: PlanTripParams): Promise<JourneyResult | 
     }
 
     if (res.status === 429) {
+      recordRateLimited();
       const retryAfterMs = parseRetryAfterMs(res) ?? 1000 * 2 ** attempt;
       if (attempt === maxAttempts - 1) {
         console.error('BVG rate limit persisted after retries, skipping cell');
@@ -104,6 +131,7 @@ export async function planTrip(params: PlanTripParams): Promise<JourneyResult | 
       return null;
     }
 
+    recordSuccess();
     const data: BvgResponse = await res.json();
     const journey = data.journeys?.[0];
     if (!journey) return null;

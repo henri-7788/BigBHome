@@ -31,4 +31,4 @@ services:
       # in-flight workers). v6.bvg.transport.rest documents no official rate limit, so this
       # is a conservative default (~2.5 req/s) rather than a known-safe number — raise it if
       # you still see 429s in the worker logs, lower it cautiously if it stays clean.
-      - COMMUTE_API_MIN_INTERVAL_MS=${COMMUTE_API_MIN_INTERVAL_MS:-400}
+      - COMMUTE_API_MIN_INTERVAL_MS=${COMMUTE_API_MIN_INTERVAL_MS:-600}

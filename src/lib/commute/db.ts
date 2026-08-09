@@ -178,6 +178,25 @@ export async function fetchTravelTimes(destinationIds: string[]): Promise<Commut
   return rows.map(rowToTravelTime);
 }
 
+/** Deletes every cached travel time for the given destinations — used by a fresh (non-resume)
+ * recompute so the map doesn't keep showing stale results for cells the new job hasn't
+ * reached yet. */
+export async function clearTravelTimes(destinationIds: string[]): Promise<void> {
+  if (destinationIds.length === 0) return;
+  const rows = await listAll<{ $id: string }>(TRAVEL_TIMES, [
+    Query.equal('destination_id', destinationIds),
+  ]);
+  const CONCURRENCY = 20;
+  let cursor = 0;
+  async function next(): Promise<void> {
+    while (cursor < rows.length) {
+      const row = rows[cursor++];
+      await databases.deleteDocument(DATABASE_ID, TRAVEL_TIMES, row.$id);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, next));
+}
+
 export async function upsertTravelTime(travelTime: CommuteTravelTime): Promise<void> {
   await withRetry(async () => {
     const id = await travelTimeDocId(

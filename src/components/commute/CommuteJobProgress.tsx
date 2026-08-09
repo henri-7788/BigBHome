@@ -94,6 +94,12 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
   }, []);
 
   async function handleRecompute(options?: { resume?: boolean }) {
+    if (!options?.resume) {
+      const confirmed = window.confirm(
+        'Neu berechnen löscht alle bisher berechneten Fahrzeiten und startet die Heatmap komplett neu. Wirklich fortfahren?',
+      );
+      if (!confirmed) return;
+    }
     setError(null);
     if (!options?.resume) setJob(null);
     try {

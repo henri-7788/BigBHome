@@ -103,6 +103,12 @@ export async function runCommuteRecompute(
     const grid = generateBerlinGrid(spacing, boundary);
     const destinations = await db.fetchCommuteDestinations();
 
+    // A fresh (non-resume) run starts the map over — clear whatever's cached so stale
+    // results from before don't linger on cells the new job hasn't reached yet.
+    if (!options?.resume) {
+      await db.clearTravelTimes(destinations.map((d) => d.id));
+    }
+
     // Start from roughly the middle (the destinations' centroid, since that's what actually
     // matters for a commute heatmap — falls back to the grid's own center if there are none
     // yet) and spiral outward, so the map fills in from the center out instead of row by row.
