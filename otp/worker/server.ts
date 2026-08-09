@@ -64,7 +64,10 @@ async function autoRecomputeLoop() {
           const jobId = randomUUID();
           await initCommuteJob(jobId);
           console.log(`Auto: ${pending} Zellen ausstehend, starte Job ${jobId}`);
-          await runJob(jobId);
+          // resume: true here too — this is the loop filling in newly-appeared gaps (e.g. a
+          // destination just got added), not a user-requested fresh start, so it must not
+          // wipe already-computed cells the way "Neu berechnen" does.
+          await runJob(jobId, undefined, true);
           delay = RECHECK_MS;
         }
       }
