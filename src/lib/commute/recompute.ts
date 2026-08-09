@@ -75,6 +75,21 @@ function taskKey(t: Pick<RecomputeTask, 'cellId' | 'destinationId' | 'weekday' |
   return `${t.cellId}_${t.destinationId}_${t.weekday}_${t.time}`;
 }
 
+/** How many (cell, destination, schedule-entry) combinations still have no cached travel
+ * time. Used by the worker's autonomous loop to decide whether there's anything left to do
+ * without spinning up a full job just to find out. */
+export async function countPendingTasks(): Promise<number> {
+  const spacing = Number(process.env.COMMUTE_GRID_SPACING_METERS ?? '500');
+  const boundary = await loadBerlinBoundaryServer();
+  const grid = generateBerlinGrid(spacing, boundary);
+  const destinations = await db.fetchCommuteDestinations();
+  if (destinations.length === 0) return 0;
+
+  const totalTasks = grid.length * destinations.reduce((sum, d) => sum + d.schedule.length, 0);
+  const existing = await db.fetchTravelTimes(destinations.map((d) => d.id));
+  return Math.max(0, totalTasks - existing.length);
+}
+
 export async function runCommuteRecompute(
   jobId: string,
   transportModes?: TransportModePreference,
