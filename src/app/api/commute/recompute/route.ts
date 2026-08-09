@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { TransportModePreference } from '@/lib/types';
-import { initCommuteJob, finishCommuteJob } from '@/lib/commute/db';
+import { initCommuteJob, finishCommuteJob, fetchLatestCommuteJob } from '@/lib/commute/db';
 import { runCommuteRecompute } from '@/lib/commute/recompute';
 
 export const maxDuration = 300;
@@ -21,6 +21,19 @@ export async function POST(req: NextRequest) {
     resumeJobId = body?.jobId;
   } catch {
     // no body provided — fall back to defaults
+  }
+
+  // A double-click, a page refresh mid-submit, or a stale UI state can otherwise fire off
+  // multiple concurrent jobs — each running its own recompute (and, for a fresh run, its own
+  // clear-the-map step) at the same time. Beyond wasting API quota, that's what caused a
+  // string of jobs to all fail at once: several clear operations racing each other tripped
+  // Appwrite's abuse protection even though each one alone was paced safely.
+  const activeJob = await fetchLatestCommuteJob().catch(() => null);
+  if (activeJob && (activeJob.status === 'pending' || activeJob.status === 'running')) {
+    return NextResponse.json(
+      { success: false, error: 'Es läuft bereits eine Berechnung.' },
+      { status: 409 },
+    );
   }
 
   // Resuming a stopped job reuses its id (and its already-reported progress) instead of

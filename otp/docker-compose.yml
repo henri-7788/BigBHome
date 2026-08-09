@@ -21,6 +21,9 @@ services:
     environment:
       - NEXT_PUBLIC_APPWRITE_ENDPOINT=${NEXT_PUBLIC_APPWRITE_ENDPOINT}
       - NEXT_PUBLIC_APPWRITE_PROJECT_ID=${NEXT_PUBLIC_APPWRITE_PROJECT_ID}
+      # Admin key — only used for the bulk delete-by-query that clears the map on a fresh
+      # (non-resume) recompute (see src/lib/commute/admin.ts). Never sent to the browser.
+      - APPWRITE_API_KEY=${APPWRITE_API_KEY}
       - BVG_API_BASE=${BVG_API_BASE:-https://v6.bvg.transport.rest}
       - COMMUTE_GRID_SPACING_METERS=${COMMUTE_GRID_SPACING_METERS:-500}
       - COMMUTE_WEBHOOK_SECRET=${COMMUTE_WEBHOOK_SECRET}

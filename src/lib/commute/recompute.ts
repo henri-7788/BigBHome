@@ -2,6 +2,7 @@ import { TransportModePreference } from '@/lib/types';
 import { loadBerlinBoundaryServer } from './boundary';
 import { generateBerlinGrid, spiralOrderCells } from './grid';
 import { planTrip } from './bvg-planner';
+import { clearTravelTimesAdmin } from './admin';
 import * as db from './db';
 
 function toPlannerTransportModes(prefs?: TransportModePreference): { mode: string }[] {
@@ -106,7 +107,7 @@ export async function runCommuteRecompute(
     // A fresh (non-resume) run starts the map over — clear whatever's cached so stale
     // results from before don't linger on cells the new job hasn't reached yet.
     if (!options?.resume) {
-      await db.clearTravelTimes(destinations.map((d) => d.id));
+      await clearTravelTimesAdmin(destinations.map((d) => d.id));
     }
 
     // Start from roughly the middle (the destinations' centroid, since that's what actually

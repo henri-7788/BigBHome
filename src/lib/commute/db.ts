@@ -178,27 +178,10 @@ export async function fetchTravelTimes(destinationIds: string[]): Promise<Commut
   return rows.map(rowToTravelTime);
 }
 
-/** Deletes every cached travel time for the given destinations — used by a fresh (non-resume)
- * recompute so the map doesn't keep showing stale results for cells the new job hasn't
- * reached yet. Paced and low-concurrency on purpose: Appwrite's built-in abuse protection
- * rate-limits bursts of requests against the public SDK, and a burst here would fail the
- * delete outright (previously: 20 concurrent deletes tripped it almost immediately, killing
- * the whole recompute job before it even started). withRetry backs off further if it still
- * gets rate-limited despite the pacing.
- */
-export async function clearTravelTimes(destinationIds: string[]): Promise<void> {
-  if (destinationIds.length === 0) return;
-  const rows = await listAll<{ $id: string }>(TRAVEL_TIMES, [
-    Query.equal('destination_id', destinationIds),
-  ]);
-  // Sequential on purpose (see note above) — this only runs once per fresh recompute, so
-  // correctness beats speed here.
-  const PACE_MS = 150;
-  for (const row of rows) {
-    await withRetry(() => databases.deleteDocument(DATABASE_ID, TRAVEL_TIMES, row.$id));
-    await new Promise((r) => setTimeout(r, PACE_MS));
-  }
-}
+// Clearing all travel times for a fresh recompute needs a bulk delete-by-query, which the
+// public SDK doesn't expose (only node-appwrite's admin client does — see admin.ts). Doing
+// it here document-by-document tripped Appwrite's abuse protection even at a conservative
+// pace, so that responsibility moved out of this (public-SDK) module entirely.
 
 export async function upsertTravelTime(travelTime: CommuteTravelTime): Promise<void> {
   await withRetry(async () => {
