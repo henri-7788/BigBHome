@@ -18,13 +18,54 @@ interface Props {
 // track of it (which otherwise looks exactly like the computation stopped).
 const STORAGE_KEY = 'commute-current-job-id';
 
+// completedCells only jumps in bursts (the job reports progress every 25 cells, not every
+// poll), so estimating speed from just the last two polls is noisy — a cell finished 2s ago
+// says nothing, then a burst of 25 lands at once. Averaging over a wider window smooths that
+// out into a stable cells/sec figure.
+const ETA_WINDOW_MS = 90_000;
+
+function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return '< 1 Min';
+  const totalMinutes = Math.round(totalSeconds / 60);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days} Tag${days > 1 ? 'e' : ''} ${hours} Std`;
+  if (hours > 0) return `${hours} Std ${minutes} Min`;
+  return `${minutes} Min`;
+}
+
 export function CommuteJobProgress({ disabled, transportModes, onProgress }: Props) {
   const [job, setJob] = useState<CommuteJob | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const samplesRef = useRef<{ completed: number; time: number }[]>([]);
+
+  function recordProgressSample(completed: number, total: number) {
+    const now = Date.now();
+    const samples = samplesRef.current;
+    samples.push({ completed, time: now });
+    while (samples.length > 1 && now - samples[0].time > ETA_WINDOW_MS) samples.shift();
+
+    const oldest = samples[0];
+    const elapsedSec = (now - oldest.time) / 1000;
+    const done = completed - oldest.completed;
+    // Need a few seconds of real progress before trusting the rate — otherwise an early
+    // burst (or a resume where the baseline just jumped) produces a wildly wrong estimate.
+    if (elapsedSec < 5 || done <= 0) {
+      setEtaSeconds(null);
+      return;
+    }
+    const cellsPerSec = done / elapsedSec;
+    const remaining = total - completed;
+    setEtaSeconds(remaining > 0 ? remaining / cellsPerSec : 0);
+  }
 
   function pollJob(jobId: string) {
     if (pollRef.current) clearInterval(pollRef.current);
+    samplesRef.current = [];
+    setEtaSeconds(null);
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/commute/jobs/${jobId}`);
@@ -32,6 +73,9 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
         if (!data.success) return;
         setJob(data.job);
         onProgress();
+        if (data.job.status === 'running') {
+          recordProgressSample(data.job.completedCells, data.job.totalCells);
+        }
         if (data.job.status === 'done' || data.job.status === 'error') {
           if (pollRef.current) clearInterval(pollRef.current);
         }
@@ -135,6 +179,8 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
         return;
       }
       if (pollRef.current) clearInterval(pollRef.current);
+      samplesRef.current = [];
+      setEtaSeconds(null);
       setJob((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
     } catch {
       setError('Netzwerkfehler');
@@ -195,7 +241,9 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
             {job.status === 'done' && 'Fertig ✓'}
             {job.status === 'error' && `Fehler: ${job.error}`}
             {stopped && `Angehalten bei ${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)`}
-            {running && `${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)`}
+            {running &&
+              `${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)` +
+                (etaSeconds !== null ? ` — noch ca. ${formatDuration(etaSeconds)}` : '')}
           </p>
         </div>
       )}
