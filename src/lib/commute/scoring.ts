@@ -1,4 +1,4 @@
-import { CommuteDestination, CommuteTravelTime } from '@/lib/types';
+import { CommuteDestination } from '@/lib/types';
 
 export interface DestinationDuration {
   destinationId: string;
@@ -6,10 +6,12 @@ export interface DestinationDuration {
   transfers: number | null;
 }
 
+type ScorableTravelTime = Pick<DestinationDuration, 'destinationId' | 'durationMinutes' | 'transfers'>;
+
 /** Averages cached travel times for one destination's schedule entries into a single duration. */
 export function averageDurationForDestination(
   destinationId: string,
-  travelTimes: CommuteTravelTime[],
+  travelTimes: ScorableTravelTime[],
 ): { durationMinutes: number | null; transfers: number | null } {
   const matches = travelTimes.filter(
     (t) => t.destinationId === destinationId && t.durationMinutes !== null,

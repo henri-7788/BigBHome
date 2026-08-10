@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCommuteDestinations } from '@/hooks/useCommuteDestinations';
 import { useCommuteSettings } from '@/hooks/useCommuteSettings';
 import { useCommuteGrid } from '@/hooks/useCommuteGrid';
@@ -10,6 +10,8 @@ import { CommuteJobProgress } from './CommuteJobProgress';
 import { CommuteHeatmapMap } from './CommuteHeatmapMap';
 import { CommuteDetailPanel } from './CommuteDetailPanel';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { fetchTravelTimesForCell } from '@/lib/commute/db';
+import { CommuteTravelTime } from '@/lib/types';
 
 export function CommuteView() {
   const { destinations, loaded, addDestination, updateDestination, updateWeight, removeDestination } =
@@ -18,8 +20,46 @@ export function CommuteView() {
   const { cellScores, loading, reloadTravelTimes } = useCommuteGrid(destinations, settings.maxMinutes);
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
 
-  const selectedCell = selectedCellId
+  // The heatmap colors come from lightweight score data only (see useCommuteGrid); the full
+  // route breakdown (`legs`) for the selected cell is fetched on demand here, only once a
+  // cell is actually clicked, instead of upfront for every cell on the map.
+  const [cellDetail, setCellDetail] = useState<CommuteTravelTime[] | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    // Nothing to fetch once the panel is closed — `cellDetail` is reset right before the
+    // next fetch starts (below), so stale data here is never shown in the meantime.
+    if (!selectedCellId) return;
+
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting for the newly selected cell before its fetch resolves
+    setDetailLoading(true);
+    setCellDetail(null);
+    fetchTravelTimesForCell(selectedCellId, destinations.map((d) => d.id))
+      .then((rows) => {
+        if (!cancelled) setCellDetail(rows);
+      })
+      .catch((err) => console.error('Cell detail load error:', err))
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCellId, destinations]);
+
+  const selectedCellBase = selectedCellId
     ? (cellScores.find((c) => c.cellId === selectedCellId) ?? null)
+    : null;
+
+  const selectedCell = selectedCellBase
+    ? {
+        ...selectedCellBase,
+        perDestination: selectedCellBase.perDestination.map((p) => ({
+          ...p,
+          legs: cellDetail?.find((t) => t.destinationId === p.destinationId)?.legs ?? null,
+        })),
+      }
     : null;
 
   if (!loaded) {
@@ -50,6 +90,7 @@ export function CommuteView() {
         <CommuteDetailPanel
           cell={selectedCell}
           destinations={destinations}
+          detailLoading={detailLoading}
           onClose={() => setSelectedCellId(null)}
         />
       </div>

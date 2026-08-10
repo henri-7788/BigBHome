@@ -1,17 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CommuteCellScore, CommuteDestination, CommuteTravelTime, GridCell } from '@/lib/types';
+import { CommuteCellScore, CommuteDestination, CommuteTravelTimeScore, GridCell } from '@/lib/types';
 import { loadBerlinBoundaryClient } from '@/lib/commute/boundary';
 import { generateBerlinGrid } from '@/lib/commute/grid';
 import { averageDurationForDestination, scoreCell } from '@/lib/commute/scoring';
-import { fetchTravelTimes } from '@/lib/commute/db';
+import { fetchTravelTimeScores } from '@/lib/commute/db';
 
 const GRID_SPACING_METERS = 500;
 
 export function useCommuteGrid(destinations: CommuteDestination[], maxMinutes: number) {
   const [grid, setGrid] = useState<GridCell[]>([]);
-  const [travelTimes, setTravelTimes] = useState<CommuteTravelTime[]>([]);
+  const [travelTimes, setTravelTimes] = useState<CommuteTravelTimeScore[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export function useCommuteGrid(destinations: CommuteDestination[], maxMinutes: n
     if (!hasLoadedOnceRef.current) {
       setLoading(true);
     }
-    fetchTravelTimes(destinationIds)
+    fetchTravelTimeScores(destinationIds)
       .then((rows) => {
         setTravelTimes(rows);
         hasLoadedOnceRef.current = true;
@@ -59,14 +59,15 @@ export function useCommuteGrid(destinations: CommuteDestination[], maxMinutes: n
         ...averageDurationForDestination(dest.id, cellTravelTimes),
       }));
 
+      // `legs` (the detailed route breakdown) isn't fetched here — it's loaded on demand
+      // when the cell is clicked, see CommuteView's cell-detail fetch.
       const perDestination = destinations.map((dest) => {
-        const match = cellTravelTimes.find((t) => t.destinationId === dest.id);
         const avg = durations.find((d) => d.destinationId === dest.id)!;
         return {
           destinationId: dest.id,
           durationMinutes: avg.durationMinutes,
           transfers: avg.transfers,
-          legs: match?.legs ?? null,
+          legs: null,
         };
       });
 

@@ -128,6 +128,15 @@ export interface CommuteTravelTime {
   legs: JourneyLeg[] | null;
 }
 
+/** Lightweight variant of CommuteTravelTime without `legs`, used to color the heatmap without
+ * paying for route detail that's only needed once a cell is clicked. */
+export interface CommuteTravelTimeScore {
+  cellId: string;
+  destinationId: string;
+  durationMinutes: number | null;
+  transfers: number | null;
+}
+
 export interface CommuteJob {
   id: string;
   status: 'pending' | 'running' | 'stopped' | 'done' | 'error';

@@ -4,6 +4,7 @@ import {
   CommuteDestination,
   CommuteJob,
   CommuteTravelTime,
+  CommuteTravelTimeScore,
   JourneyLeg,
 } from '@/lib/types';
 
@@ -12,6 +13,30 @@ const TRAVEL_TIMES = 'commute_travel_times';
 const JOBS = 'commute_jobs';
 const PAGE_SIZE = 100;
 
+// Node's fetch (what the Appwrite SDK uses under the hood) has no default timeout — a
+// connection that stalls mid-request (e.g. a flaky tunnel) hangs the returned promise
+// forever instead of rejecting, which withRetry can't do anything about since it only
+// reacts to rejections. Racing every attempt against this timeout turns a silent hang into
+// a normal, retryable failure. Confirmed in production: the worker's autonomous loop got
+// stuck indefinitely on a single stalled listDocuments call after a Cloudflare Tunnel blip.
+const REQUEST_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Appwrite request timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 // The recompute job can run for hours across thousands of Appwrite calls. Without a retry,
 // a single transient blip (e.g. a momentary DNS failure) throws and kills the whole job,
 // discarding all progress made so far — so retry a few times with backoff before giving up.
@@ -19,7 +44,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await fn();
+      return await withTimeout(fn(), REQUEST_TIMEOUT_MS);
     } catch (err) {
       lastErr = err;
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * 2 ** i));
@@ -28,24 +53,69 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   throw lastErr;
 }
 
+// Appwrite's abuse protection rate-limits each endpoint fairly aggressively — firing every
+// remaining page at once tripped it almost immediately on collections with more than a
+// couple hundred rows. A small fixed concurrency still cuts wall-clock time drastically
+// over one-at-a-time sequential pagination without coming anywhere near that limit.
+const LIST_ALL_CONCURRENCY = 5;
+
+async function mapWithConcurrency<In, Out>(
+  items: In[],
+  concurrency: number,
+  fn: (item: In) => Promise<Out>,
+): Promise<Out[]> {
+  const results: Out[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+// Offset-based (rather than cursor-based) so that once we know the total, the remaining
+// pages can be fetched with limited concurrency instead of waiting on each other one round
+// trip at a time — this collection can hold many thousands of rows, and sequential
+// pagination was the main cause of the heatmap taking a long time to show anything on load.
 async function listAll<T extends { $id: string }>(
   collection: string,
   queries: string[],
+  selectFields?: string[],
 ): Promise<T[]> {
-  const results: T[] = [];
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await databases.listDocuments(DATABASE_ID, collection, [
-      ...queries,
+  const baseQueries = selectFields ? [...queries, Query.select(selectFields)] : queries;
+
+  const first = await withRetry(() =>
+    databases.listDocuments(DATABASE_ID, collection, [
+      ...baseQueries,
       Query.limit(PAGE_SIZE),
-      ...(cursor ? [Query.cursorAfter(cursor)] : []),
-    ]);
-    const rows = page.documents as unknown as T[];
-    results.push(...rows);
-    if (rows.length < PAGE_SIZE) break;
-    cursor = rows[rows.length - 1].$id;
+      Query.offset(0),
+    ]),
+  );
+  const total = first.total;
+  const pages: T[][] = [first.documents as unknown as T[]];
+
+  const pageCount = Math.ceil(total / PAGE_SIZE);
+  if (pageCount > 1) {
+    const rest = await mapWithConcurrency(
+      Array.from({ length: pageCount - 1 }, (_, i) => i + 1),
+      LIST_ALL_CONCURRENCY,
+      (pageIndex) =>
+        withRetry(() =>
+          databases.listDocuments(DATABASE_ID, collection, [
+            ...baseQueries,
+            Query.limit(PAGE_SIZE),
+            Query.offset(pageIndex * PAGE_SIZE),
+          ]),
+        ).then((page) => page.documents as unknown as T[]),
+    );
+    pages.push(...rest);
   }
-  return results;
+
+  return pages.flat();
 }
 
 /** commute_travel_times has no natural single-column key — derive a stable 32-char
@@ -173,6 +243,43 @@ export async function deleteCommuteDestination(id: string): Promise<void> {
 export async function fetchTravelTimes(destinationIds: string[]): Promise<CommuteTravelTime[]> {
   if (destinationIds.length === 0) return [];
   const rows = await listAll<CommuteTravelTimeRow & { $id: string }>(TRAVEL_TIMES, [
+    Query.equal('destination_id', destinationIds),
+  ]);
+  return rows.map(rowToTravelTime);
+}
+
+// Fields needed to color the heatmap. Excludes `legs` (the detailed route breakdown), which
+// is by far the largest field on this collection but is only ever shown for one cell at a
+// time — fetching it for every cell on initial load is wasted bandwidth that was the biggest
+// contributor to the heatmap staying blank for a while after the page finished loading.
+const SCORE_FIELDS = ['cell_id', 'destination_id', 'duration_minutes', 'transfers'];
+
+export async function fetchTravelTimeScores(
+  destinationIds: string[],
+): Promise<CommuteTravelTimeScore[]> {
+  if (destinationIds.length === 0) return [];
+  const rows = await listAll<Pick<CommuteTravelTimeRow, 'cell_id' | 'destination_id' | 'duration_minutes' | 'transfers'> & { $id: string }>(
+    TRAVEL_TIMES,
+    [Query.equal('destination_id', destinationIds)],
+    SCORE_FIELDS,
+  );
+  return rows.map((row) => ({
+    cellId: row.cell_id,
+    destinationId: row.destination_id,
+    durationMinutes: row.duration_minutes,
+    transfers: row.transfers,
+  }));
+}
+
+/** Full rows (including `legs`) for a single grid cell — fetched lazily when the user clicks
+ * that cell, instead of upfront for every cell on the map. */
+export async function fetchTravelTimesForCell(
+  cellId: string,
+  destinationIds: string[],
+): Promise<CommuteTravelTime[]> {
+  if (destinationIds.length === 0) return [];
+  const rows = await listAll<CommuteTravelTimeRow & { $id: string }>(TRAVEL_TIMES, [
+    Query.equal('cell_id', cellId),
     Query.equal('destination_id', destinationIds),
   ]);
   return rows.map(rowToTravelTime);

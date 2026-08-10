@@ -2,10 +2,12 @@
 
 import { CommuteCellScore, CommuteDestination, JourneyResult } from '@/lib/types';
 import { JourneyResultView } from '@/components/JourneyResult';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 interface Props {
   cell: CommuteCellScore | null;
   destinations: CommuteDestination[];
+  detailLoading?: boolean;
   onClose: () => void;
 }
 
@@ -16,7 +18,7 @@ function scoreColor(score: number | null): string {
   return 'text-red-600';
 }
 
-export function CommuteDetailPanel({ cell, destinations, onClose }: Props) {
+export function CommuteDetailPanel({ cell, destinations, detailLoading, onClose }: Props) {
   if (!cell) return null;
 
   return (
@@ -46,6 +48,18 @@ export function CommuteDetailPanel({ cell, destinations, onClose }: Props) {
               <div key={dest.id} className="pt-3 first:pt-0">
                 <p className="text-xs font-semibold text-gray-700">{dest.name}</p>
                 <p className="text-xs text-gray-400">Keine Verbindung berechnet</p>
+              </div>
+            );
+          }
+
+          if (detail.legs === null && detailLoading) {
+            return (
+              <div key={dest.id} className="pt-3 first:pt-0">
+                <p className="text-xs font-semibold text-gray-700 mb-1">{dest.name}</p>
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <LoadingSpinner size="sm" />
+                  Lade Route…
+                </div>
               </div>
             );
           }

@@ -120,9 +120,14 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
           }
           if (data.job.status === 'pending' || data.job.status === 'running') {
             adopt(data.job);
-          } else if (storedJob) {
+          } else if (storedJob && new Date(storedJob.createdAt) > new Date(data.job.createdAt)) {
+            // The stored job is more recent than what "latest" returned (e.g. eventual
+            // consistency right after starting a job elsewhere) — trust it over "latest".
             setJob(storedJob);
           } else {
+            // "latest" is genuinely the newer (or only) job — show it even if the stored id
+            // points at some older run this browser happened to start, otherwise a stale
+            // localStorage entry could permanently hide a job's real, more recent outcome.
             setJob(data.job);
           }
         })
@@ -188,7 +193,10 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
   }
 
   const running = job && (job.status === 'pending' || job.status === 'running');
-  const stopped = job?.status === 'stopped';
+  // A job that ended in 'error' (e.g. a transient rate-limit) already has most of its cells
+  // computed and cached — treating it like 'stopped' lets it resume from there instead of
+  // forcing a full wipe-and-restart via "Neu berechnen" for what's often a one-off hiccup.
+  const stopped = job?.status === 'stopped' || job?.status === 'error';
   const progressPct = job && job.totalCells > 0 ? Math.round((job.completedCells / job.totalCells) * 100) : 0;
 
   return (
@@ -239,8 +247,13 @@ export function CommuteJobProgress({ disabled, transportModes, onProgress }: Pro
           </div>
           <p className="text-xs text-gray-500">
             {job.status === 'done' && 'Fertig ✓'}
-            {job.status === 'error' && `Fehler: ${job.error}`}
-            {stopped && `Angehalten bei ${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)`}
+            {job.status === 'error' && <>Fehler: {job.error}</>}
+            {stopped && (
+              <>
+                {job.status === 'error' && <br />}
+                Angehalten bei {job.completedCells} / {job.totalCells} Zellen ({progressPct}%)
+              </>
+            )}
             {running &&
               `${job.completedCells} / ${job.totalCells} Zellen (${progressPct}%)` +
                 (etaSeconds !== null ? ` — noch ca. ${formatDuration(etaSeconds)}` : '')}
